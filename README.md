@@ -28,4 +28,4 @@ The SpeechRecognizer engine restarts between utterances and drops speech. The pl
 3. Open the downloaded file. When Android asks, allow installs from this source (Settings > Apps > Special access > Install unknown apps > your browser), then tap Install.
 4. Open wktalkclip, allow the microphone, and press the start button. Each finished sentence lands in the clipboard history.
 
-Every push to `main` builds a new debug-signed APK in GitHub Actions and publishes it as the latest release. An update installed over an older build keeps working only while the signing key matches; if Android refuses the update, uninstall the old app first.
+Every push to `main` builds a new debug-signed APK in GitHub Actions and publishes it as the latest release. The signing key is created once and kept in the repository's Actions cache, so each new build installs over the previous one. If the cache is ever evicted (unused for 7 days) a new key is made and Android will refuse the update; then uninstall the old app once and install again.

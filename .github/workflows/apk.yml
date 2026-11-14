@@ -25,8 +25,18 @@ jobs:
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" > /dev/null
           echo "ANDROID_SDK=$SDK" >> "$GITHUB_ENV"
 
+      - name: Restore signing key (created once, kept in the Actions cache)
+        uses: actions/cache@v4
+        with:
+          path: wktalkclip.jks
+          key: apk-signing-v1
+
       - name: Build
         run: ./build.sh
+
+      - name: Show signing certificate fingerprint
+        run: |
+          "$ANDROID_SDK/build-tools/34.0.0/apksigner" verify --print-certs out/wktalkclip.apk | grep 'SHA-256 digest'
 
       - name: Upload run artifact
         uses: actions/upload-artifact@v4
