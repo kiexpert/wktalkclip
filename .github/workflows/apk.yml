@@ -38,7 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="build-${GITHUB_RUN_NUMBER}"
+          TAG="v0.1.${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" out/wktalkclip.apk \
             --target "$GITHUB_SHA" \
             --title "wktalkclip build ${GITHUB_RUN_NUMBER}" \
