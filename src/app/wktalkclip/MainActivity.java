@@ -527,8 +527,27 @@ public class MainActivity extends Activity
 
     // ---- transcript commits -------------------------------------------------
 
+    // Every finished sentence is shown and, at the same moment, placed in the clipboard as its
+    // own entry, so the phone's clipboard history keeps the whole transcript. Nothing is written
+    // to a file and nothing leaves the phone. Diff lines are display only and are not copied.
     private void addLine(String text) {
         lines.add("[" + nowText() + "] " + text);
+        clipSentence(text);
+    }
+
+    private void clipSentence(String text) {
+        String t = text.trim();
+        if (t.length() == 0) {
+            return;
+        }
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", t));
+            }
+        } catch (RuntimeException e) {
+            lastEvent = "clip failed " + e.getClass().getSimpleName();
+        }
     }
 
     // Commits the composing line as a normal line when it holds text, then resets it.
