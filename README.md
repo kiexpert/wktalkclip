@@ -23,7 +23,7 @@ The SpeechRecognizer engine restarts between utterances and drops speech. The pl
 
 ## Install on a phone
 
-1. On the phone, open https://github.com/kiexpert/wktalkclip/releases/latest in the browser.
+1. On the phone, open this repository on GitHub, tap Releases, and open the latest release.
 2. Under Assets, tap `wktalkclip.apk` to download it.
 3. Open the downloaded file. When Android asks, allow installs from this source (Settings > Apps > Special access > Install unknown apps > your browser), then tap Install.
 4. Open wktalkclip, allow the microphone, and press the start button. Each finished sentence lands in the clipboard history.
