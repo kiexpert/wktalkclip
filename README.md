@@ -20,3 +20,12 @@ Output: `out/wktalkclip.apk`, signed with a local debug keystore that the script
 ## Next engine
 
 The SpeechRecognizer engine restarts between utterances and drops speech. The planned replacement is the sherpa-onnx streaming Korean zipformer, which runs continuously on device. Models are downloaded at build or first run from https://github.com/k2-fsa/sherpa-onnx/releases (tag `asr-models`) and are never committed. See `docs/oss-survey.md`.
+
+## Install on a phone
+
+1. On the phone, open https://github.com/kiexpert/wktalkclip/releases/latest in the browser.
+2. Under Assets, tap `wktalkclip.apk` to download it.
+3. Open the downloaded file. When Android asks, allow installs from this source (Settings > Apps > Special access > Install unknown apps > your browser), then tap Install.
+4. Open wktalkclip, allow the microphone, and press the start button. Each finished sentence lands in the clipboard history.
+
+Every push to `main` builds a new debug-signed APK in GitHub Actions and publishes it as the latest release. An update installed over an older build keeps working only while the signing key matches; if Android refuses the update, uninstall the old app first.
