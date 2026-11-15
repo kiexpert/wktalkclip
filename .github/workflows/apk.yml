@@ -31,6 +31,9 @@ jobs:
           path: wktalkclip.jks
           key: apk-signing-v1
 
+      - name: Plain-Java checks
+        run: ./test.sh
+
       - name: Build
         run: ./build.sh
 

@@ -67,6 +67,9 @@ public class MainActivity extends Activity
 
     // Finished lines. Only onClearPressed removes them.
     private final ArrayList<String> lines = new ArrayList<String>();
+    // The same sentences as one clipboard entry for this screen. Written on pause or stop, replaced
+    // each time, so the clipboard history gets one entry per screen and not one per sentence.
+    private final ScreenClip screenClip = new ScreenClip();
     // Composing (grey) line: the guess that is still being extended. Append-only.
     private String shown = "";
     // Partial results since the last commit, shown in the debug marker.
@@ -297,10 +300,15 @@ public class MainActivity extends Activity
         handler.removeMessages(WHAT_WATCHDOG);
         commitShown("");
         listening = false;
+        // Drop the recognizer instead of only stopping it: a recognizer that is still finishing
+        // the old session answers the next start with busy/client errors and nothing is heard.
         if (recognizer != null) {
-            recognizer.stopListening();
+            recognizer.cancel();
+            recognizer.destroy();
+            recognizer = null;
         }
         sessionRunning = false;
+        flushClip();
         unmuteBeeps();
         startButton.setText("시작");
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -380,8 +388,15 @@ public class MainActivity extends Activity
         if (sessionRunning) {
             return;
         }
-        recognizer.startListening(recognizerIntent);
+        try {
+            recognizer.startListening(recognizerIntent);
+        } catch (RuntimeException e) {
+            setStatus("마이크를 열지 못했어요: " + e.getClass().getSimpleName());
+            noteEvent("startFail");
+            return;
+        }
         sessionRunning = true;
+        setStatus("듣는 중이에요. 말씀하세요.");
     }
 
     // ---- stall watchdog -------------------------------------------------------
@@ -461,6 +476,7 @@ public class MainActivity extends Activity
         clearArmed = false;
         clearButton.setText("지우기");
         lines.clear();
+        screenClip.clear();
         shown = "";
         partialCount = 0;
         render();
@@ -527,23 +543,24 @@ public class MainActivity extends Activity
 
     // ---- transcript commits -------------------------------------------------
 
-    // Every finished sentence is shown and, at the same moment, placed in the clipboard as its
-    // own entry, so the phone's clipboard history keeps the whole transcript. Nothing is written
-    // to a file and nothing leaves the phone. Diff lines are display only and are not copied.
+    // Every finished sentence is shown and joins this screen's single clipboard entry. The entry
+    // is written once when the screen pauses or listening stops (flushClip), so the phone's
+    // clipboard history gets one entry per screen. Nothing is written to a file and nothing
+    // leaves the phone. Diff lines are display only and are not copied.
     private void addLine(String text) {
         lines.add("[" + nowText() + "] " + text);
-        clipSentence(text);
+        screenClip.add(text);
     }
 
-    private void clipSentence(String text) {
-        String t = text.trim();
-        if (t.length() == 0) {
+    private void flushClip() {
+        if (!screenClip.needsWrite()) {
             return;
         }
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", t));
+                cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", screenClip.text()));
+                screenClip.markWritten();
             }
         } catch (RuntimeException e) {
             lastEvent = "clip failed " + e.getClass().getSimpleName();
@@ -774,7 +791,36 @@ public class MainActivity extends Activity
     }
 
     @Override
+    protected void onPause() {
+        flushClip();
+        super.onPause();
+    }
+
+    // Back from the background or a screen-off: the recognizer may have been cut off while the
+    // permission or the microphone changed. Re-check the permission and restart the session.
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!listening) {
+            return;
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            endSession("마이크 권한이 없어요. 시작을 눌러 허용해 주세요.");
+            return;
+        }
+        if (!sessionRunning && !restartPending) {
+            if (recognizer != null) {
+                recognizer.destroy();
+                recognizer = null;
+            }
+            startSegment();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
+        flushClip();
         restartPending = false;
         listening = false;
         handler.removeCallbacksAndMessages(null);

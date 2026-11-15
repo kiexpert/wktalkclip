@@ -1,6 +1,6 @@
 # wktalkclip
 
-On-device Korean speech-to-text for Android. Audio never leaves the phone: no server traffic and no files written. Each finished sentence goes into its own clipboard entry, so the phone's clipboard history keeps the transcript.
+On-device Korean speech-to-text for Android. Audio never leaves the phone: no server traffic and no files written. One screen is one clipboard entry: the sentences of the screen are kept together and the entry is written when the app is paused or stopped, so the clipboard history is not filled with one entry per sentence.
 
 ## Rules the app follows
 
@@ -26,6 +26,6 @@ The SpeechRecognizer engine restarts between utterances and drops speech. The pl
 1. On the phone, open this repository on GitHub, tap Releases, and open the latest release.
 2. Under Assets, tap `wktalkclip.apk` to download it.
 3. Open the downloaded file. When Android asks, allow installs from this source (Settings > Apps > Special access > Install unknown apps > your browser), then tap Install.
-4. Open wktalkclip, allow the microphone, and press the start button. Each finished sentence lands in the clipboard history.
+4. Open wktalkclip, allow the microphone, and press the start button. The screen's text lands in the clipboard as one entry when you leave the app or press stop.
 
 Every push to `main` builds a new debug-signed APK in GitHub Actions and publishes it as the latest release. The signing key is created once and kept in the repository's Actions cache, so each new build installs over the previous one. If the cache is ever evicted (unused for 7 days) a new key is made and Android will refuse the update; then uninstall the old app once and install again (the cache key is apk-signing-v1).
