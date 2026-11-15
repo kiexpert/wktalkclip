@@ -1,0 +1,65 @@
+name: Emulator voice QA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['qa/voice.sh', '.github/workflows/emulator-voice.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [v0.1.8, v0.1.9]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the APK under test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ matrix.tag }}" --pattern wktalkclip.apk --dir apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Virtual microphone (null sink) and speech clip
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq pulseaudio pulseaudio-utils espeak-ng ffmpeg > /dev/null
+          pulseaudio --start --exit-idle-time=-1 || true
+          pactl load-module module-null-sink sink_name=vmic sink_properties=device.description=vmic
+          pactl set-default-source vmic.monitor
+          pactl list short sources
+          mkdir -p clip
+          # Source 1: the owner's idea, a short Korean clip from YouTube (usually blocked on datacenter IPs).
+          pip install -q yt-dlp gTTS > /dev/null 2>&1 || true
+          if timeout 90 yt-dlp -x --audio-format wav --max-downloads 1 -o clip/yt.%(ext)s "ytsearch1:한국어 뉴스 앵커 멘트 크리에이티브 커먼즈" > clip/yt.log 2>&1 && [ -f clip/yt.wav ]; then
+            echo "AUDIO_SOURCE=youtube"; cp clip/yt.wav clip/voice.wav
+          elif python3 -c "from gtts import gTTS; gTTS('안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다.', lang='ko').save('clip/tts.mp3')" 2>/dev/null && ffmpeg -loglevel error -y -i clip/tts.mp3 clip/voice.wav; then
+            echo "AUDIO_SOURCE=gtts"
+          else
+            espeak-ng -v ko -w clip/voice.wav "안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다."
+            echo "AUDIO_SOURCE=espeak"
+          fi
+          tail -2 clip/yt.log || true
+          ls -la clip
+          ( while true; do paplay --device=vmic clip/voice.wav; sleep 1; done ) > /dev/null 2>&1 &
+
+      - name: Run on emulator (Play image, host audio allowed)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PULSE_SOURCE: vmic.monitor
+        with:
+          api-level: 34
+          target: google_apis_playstore
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -allow-host-audio
+          script: ./qa/voice.sh apk/wktalkclip.apk
