@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['qa/voice.sh', 'src/**', '.github/workflows/emulator-voice.yml']
+    paths: ['qa/**', 'src/**', '.github/workflows/emulator-voice.yml']
 
 permissions:
   contents: read
@@ -28,11 +28,6 @@ jobs:
             patch: false
             lang: en
             wait: 120
-          - name: green-new-ko
-            ref: ${{ github.sha }}
-            patch: false
-            lang: ko
-            wait: 420
     name: voice ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +51,12 @@ jobs:
           if [ "${{ matrix.patch }}" = true ]; then sed -i 's/"ko-KR"/"en-US"/' app/src/app/wktalkclip/MainActivity.java; fi
           (cd app && ./build.sh)
           mkdir -p qa-src/apk && cp app/out/wktalkclip.apk qa-src/apk/wktalkclip.apk
+
+      - name: Build the plain recorder probe
+        run: |
+          export ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          (cd qa-src && ./qa/probe/build.sh)
+          ls -la qa-src/out/micprobe.apk
 
       - name: Enable KVM
         run: |
@@ -92,4 +93,4 @@ jobs:
           arch: x86_64
           working-directory: qa-src
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -allow-host-audio
-          script: ./qa/voice.sh apk/wktalkclip.apk ${{ matrix.lang }} ${{ matrix.wait }}
+          script: ./qa/mic_voice.sh apk/wktalkclip.apk ${{ matrix.lang }} ${{ matrix.wait }}

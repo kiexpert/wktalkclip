@@ -45,6 +45,23 @@ cycle() {  # $1 = label
   else res "FAIL $1 clipboard writes after $N sentences: $C"; FAILS=$((FAILS+1)); fi
   adb shell am force-stop $PKG; sleep 2
 }
+# S2: accept the offline model download once, before the measured cycles, so cycle 1 can listen.
+warmup() {
+  launch
+  [ "$LANGSEL" = en ] && { $PY ui.py tap "한국어" >/dev/null; sleep 1; }
+  $PY ui.py tap "시작" >/dev/null; sleep 6
+  if has "$(screen)" "음성 모델 받기"; then
+    $PY ui.py tap "음성 모델 받기" >/dev/null
+    for i in 1 2 3 4 5 6; do
+      sleep 5
+      D=$(screen); echo "[warmup] dialog check $i: $D"
+      if has "$D" "Download this update"; then $PY ui.py tap "Download" >/dev/null; break; fi
+    done
+    sleep "$WAIT"
+  fi
+  adb shell am force-stop $PKG; sleep 2
+}
+warmup
 cycle first
 cycle second
 exit $FAILS

@@ -5,3 +5,4 @@ sdk/
 *.idsig
 *.jks
 *.onnx
+gen_probe/
