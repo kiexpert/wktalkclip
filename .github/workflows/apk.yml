@@ -52,8 +52,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v0.1.${GITHUB_RUN_NUMBER}"
+          { echo "Built from ${GITHUB_SHA::7} (run ${GITHUB_RUN_ID})."; echo; cat RELEASE_NOTES.md; } > release-notes.txt
           gh release create "$TAG" out/wktalkclip.apk \
             --target "$GITHUB_SHA" \
             --title "wktalkclip build ${GITHUB_RUN_NUMBER}" \
-            --notes "Debug-signed APK built from ${GITHUB_SHA::7}. Install on the phone: download wktalkclip.apk and allow installs from this source." \
+            --notes-file release-notes.txt \
             --latest
