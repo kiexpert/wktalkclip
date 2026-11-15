@@ -15,8 +15,14 @@ rm -f out/res.zip out/unsigned.apk out/aligned.apk out/wktalkclip.apk
 "$B/aapt2" compile --dir res -o out/res.zip
 
 # Step 2: link manifest and resources, generate R.java
+# CI sets BUILD_NUMBER (the run number, also the release tag v0.1.N): versionCode becomes 100 + N,
+# which is what an in-app update check compares with. Local builds keep the manifest values.
+VERARGS=""
+if [ -n "${BUILD_NUMBER:-}" ]; then
+    VERARGS="--version-code $((100 + BUILD_NUMBER)) --version-name 1.${BUILD_NUMBER}"
+fi
 "$B/aapt2" link -I "$P" --manifest AndroidManifest.xml -o out/unsigned.apk \
-    --java gen out/res.zip --min-sdk-version 31 --target-sdk-version 34
+    --java gen out/res.zip --min-sdk-version 31 --target-sdk-version 34 $VERARGS
 
 # Step 3: compile Java
 javac --release 11 -classpath "$P" -d out/classes \
