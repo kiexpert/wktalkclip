@@ -1,0 +1,117 @@
+name: Emulator feed QA
+
+# Speech recognition without a microphone: the app's FeedSource hook streams feed.wav into the
+# on-device recognizer. Not triggered by src changes, to keep CI cost down.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'qa/feed.sh'
+      - 'qa/ui.py'
+      - '.github/workflows/emulator-feed.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  feed:
+    runs-on: ubuntu-latest
+    name: feed ${{ matrix.lang }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lang: en
+            text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
+            tts: en
+            wait: 120
+            words: 'meeting schedule'
+            best_effort: false
+          # Best effort: the on-device Korean model may not install on the runner.
+          - lang: ko
+            text: '안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다.'
+            tts: ko
+            wait: 420
+            words: '회의 일정'
+            best_effort: true
+    continue-on-error: ${{ matrix.best_effort }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build the APK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          export ANDROID_SDK="$SDK"
+          ./build.sh
+          mkdir -p apk && cp out/wktalkclip.apk apk/wktalkclip.apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Speech clip (gTTS to canonical 16 kHz mono PCM WAV)
+        env:
+          TEXT: ${{ matrix.text }}
+          TTS_LANG: ${{ matrix.tts }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          pip install -q gTTS
+          mkdir -p clip
+          python3 -c "import os; from gtts import gTTS; gTTS(os.environ['TEXT'], lang=os.environ['TTS_LANG']).save('clip/clip.mp3')"
+          (cd clip && ffmpeg -loglevel error -y -i clip.mp3 -ar 16000 -ac 1 -c:a pcm_s16le -map_metadata -1 -bitexact -fflags +bitexact -flags:a +bitexact feed.wav)
+          python3 - <<'PY'
+          import struct, sys
+          p = 'clip/feed.wav'
+          b = open(p, 'rb').read()
+          def ok(b):
+              return (len(b) > 44 and b[0:4] == b'RIFF' and b[8:12] == b'WAVE' and b[12:16] == b'fmt '
+                      and struct.unpack('<I', b[16:20])[0] == 16 and b[36:40] == b'data'
+                      and struct.unpack('<HHIIHH', b[20:36]) == (1, 1, 16000, 32000, 2, 16))
+          if not ok(b):
+              # Rewrite: keep only the fmt and data chunks (drops LIST and others) in the canonical layout.
+              pos, data = 12, None
+              while pos + 8 <= len(b):
+                  cid, n = b[pos:pos+4], struct.unpack('<I', b[pos+4:pos+8])[0]
+                  if cid == b'data':
+                      data = b[pos+8:pos+8+n]
+                      break
+                  pos += 8 + n + (n & 1)
+              if not data:
+                  sys.exit('no data chunk in feed.wav')
+              hdr = (b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVEfmt ' +
+                     struct.pack('<IHHIIHH', 16, 1, 1, 16000, 32000, 2, 16) +
+                     b'data' + struct.pack('<I', len(data)))
+              b = hdr + data
+              open(p, 'wb').write(b)
+              print('rewrote header')
+          if not ok(b):
+              sys.exit('feed.wav is not the canonical 44-byte PCM 16 kHz mono layout')
+          print('feed.wav OK, %d bytes, %.1f s' % (len(b), (len(b) - 44) / 32000))
+          PY
+
+      - name: Run on emulator (recognizer hears feed.wav)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          FEED_OUT: ${{ github.workspace }}/feed-out
+        with:
+          api-level: 34
+          target: google_apis_playstore
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          script: ./qa/feed.sh apk/wktalkclip.apk clip/feed.wav ${{ matrix.lang }} ${{ matrix.wait }} ${{ matrix.words }}
+
+      - name: Upload screen dump and logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feed-${{ matrix.lang }}
+          path: feed-out/
+          if-no-files-found: warn
