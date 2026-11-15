@@ -2,7 +2,7 @@
 # Emulator run with real speech played into the virtual microphone.
 # Usage: voice.sh <apk> ; prints RESULT lines for each measured step.
 set -u
-APK="$1"
+APK="$(realpath "$1")"
 PKG=app.wktalkclip
 PY="python3 -I"
 cd "$(dirname "$0")"

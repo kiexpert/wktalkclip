@@ -41,7 +41,7 @@ jobs:
           mkdir -p clip
           # Source 1: the owner's idea, a short Korean clip from YouTube (usually blocked on datacenter IPs).
           pip install -q yt-dlp gTTS > /dev/null 2>&1 || true
-          if timeout 90 yt-dlp -x --audio-format wav --max-downloads 1 -o clip/yt.%(ext)s "ytsearch1:한국어 뉴스 앵커 멘트 크리에이티브 커먼즈" > clip/yt.log 2>&1 && [ -f clip/yt.wav ]; then
+          if timeout 90 yt-dlp -x --audio-format wav --max-downloads 1 -o 'clip/yt.%(ext)s' "ytsearch1:한국어 뉴스 앵커 멘트 크리에이티브 커먼즈" > clip/yt.log 2>&1 && [ -f clip/yt.wav ]; then
             echo "AUDIO_SOURCE=youtube"; cp clip/yt.wav clip/voice.wav
           elif python3 -c "from gtts import gTTS; gTTS('안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다.', lang='ko').save('clip/tts.mp3')" 2>/dev/null && ffmpeg -loglevel error -y -i clip/tts.mp3 clip/voice.wav; then
             echo "AUDIO_SOURCE=gtts"
