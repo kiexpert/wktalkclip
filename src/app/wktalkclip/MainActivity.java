@@ -110,6 +110,10 @@ public class MainActivity extends Activity
     private String supportText = "아직 확인 전";
     private Button diagButton;
     private Button shareButton;
+    // A phone call or voice-call app pauses the meeting; it restarts by itself when the call ends.
+    private final MeetingPause meetingPause = new MeetingPause();
+    private FocusGuard focusGuard;
+    private boolean pausedByPolicy = false;
     private ScrollView diagScroll;
     private TextView diagView;
 
@@ -384,11 +388,56 @@ public class MainActivity extends Activity
                     REQ_NOTIFY);
         }
         setStatus("회의 중에는 폰 소리를 꺼 둬요");
+        pausedByPolicy = false;
+        focusGuard = new FocusGuard(this, meetingPause, new Runnable() {
+            @Override
+            public void run() {
+                recheckPause();
+            }
+        });
+        focusGuard.start();
+        recheckPause();
         startSegment();
         scheduleWatchdog();
     }
 
+    // Called when a call starts or ends. Pauses the recognizer during a call and restarts it
+    // as soon as the phone is free again.
+    private void recheckPause() {
+        if (!listening) {
+            return;
+        }
+        boolean shouldListen = meetingPause.shouldListen(true);
+        if (!shouldListen && !pausedByPolicy) {
+            pausedByPolicy = true;
+            restartPending = false;
+            handler.removeCallbacks(this);
+            if (recognizer != null) {
+                recognizer.cancel();
+                recognizer.destroy();
+                recognizer = null;
+            }
+            sessionRunning = false;
+            commitShown("");
+            render();
+            eventLog.add(System.currentTimeMillis() - sessionStartMs, "일시정지 " + meetingPause.reason());
+            setStatus("일시정지: " + meetingPause.reason() + ". 끝나면 자동으로 다시 들어요.");
+        } else if (shouldListen && pausedByPolicy) {
+            pausedByPolicy = false;
+            consecutiveErrors = 0;
+            lastForceRestartMs = 0L;
+            lastEventMs = System.currentTimeMillis();
+            eventLog.add(System.currentTimeMillis() - sessionStartMs, "다시 시작 (통화 끝)");
+            setStatus("다시 듣고 있어요.");
+            startSegment();
+        }
+    }
+
     private void endSession(String message) {
+        pausedByPolicy = false;
+        if (focusGuard != null) {
+            focusGuard.stop();
+        }
         restartPending = false;
         handler.removeMessages(WHAT_WATCHDOG);
         commitShown("");
@@ -446,7 +495,7 @@ public class MainActivity extends Activity
 
     // Starts one recognizer session on the microphone. Returns when a session is still running.
     private void startSegment() {
-        if (sessionRunning) {
+        if (sessionRunning || pausedByPolicy) {
             return;
         }
         ensureRecognizer();
@@ -559,6 +608,11 @@ public class MainActivity extends Activity
     // while sound is present, or when it has gone quiet for too long regardless.
     private void watchdogTick() {
         if (!listening) {
+            return;
+        }
+        if (pausedByPolicy) {
+            updateEventLine();
+            scheduleWatchdog();
             return;
         }
         long now = System.currentTimeMillis();
@@ -1141,6 +1195,9 @@ public class MainActivity extends Activity
     protected void onDestroy() {
         flushClip();
         FeedSource.stop();
+        if (focusGuard != null) {
+            focusGuard.stop();
+        }
         stopService(new Intent(this, RecService.class));
         restartPending = false;
         listening = false;
