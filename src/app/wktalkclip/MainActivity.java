@@ -877,7 +877,30 @@ public class MainActivity extends Activity
     // leaves the phone. Diff lines are display only and are not copied.
     private void addLine(String text) {
         lines.add("[" + nowText() + "] " + text);
+        clipAdd(text);
+    }
+
+    // A finished sentence joins this screen's clipboard entry, and, only when Features.SAVE_MEETING_FILE
+    // is switched on, is also appended to the dated meeting file in the app's private folder.
+    private void clipAdd(String text) {
         screenClip.add(text);
+        if (Features.SAVE_MEETING_FILE) {
+            String l = MeetingFile.line(System.currentTimeMillis(), text, java.util.TimeZone.getDefault());
+            if (l.length() > 0) {
+                try {
+                    java.io.File f = new java.io.File(getFilesDir(),
+                            MeetingFile.fileName(System.currentTimeMillis(), java.util.TimeZone.getDefault()));
+                    java.io.FileOutputStream out = new java.io.FileOutputStream(f, true);
+                    try {
+                        out.write(l.getBytes("UTF-8"));
+                    } finally {
+                        out.close();
+                    }
+                } catch (java.io.IOException e) {
+                    lastEvent = "file failed";
+                }
+            }
+        }
     }
 
     // Display line whose text is not (or no longer) the best guess: shown, never copied.
@@ -918,7 +941,7 @@ public class MainActivity extends Activity
     private void commitShown(String suffix) {
         if (shown.length() > 0) {
             lines.add("[" + nowText() + "] " + shown + suffix);
-            screenClip.add(shown);
+            clipAdd(shown);
         }
         shown = "";
         partialCount = 0;

@@ -14,7 +14,7 @@ public class MeetingFileTest {
 
     public static void main(String[] a) {
         TimeZone seoul = TimeZone.getTimeZone("Asia/Seoul");
-        long t = 1794787200000L; // 2026-11-16 00:00:00 Asia/Seoul is 2026-11-15 15:00:00 UTC
+        long t = 1794754800000L; // 2026-11-16 00:00:00 Asia/Seoul is 2026-11-15 15:00:00 UTC
         check("file is named by the local date", "meeting-2026-11-16.txt".equals(MeetingFile.fileName(t, seoul)));
         check("the same instant is the previous day in UTC", "meeting-2026-11-15.txt".equals(MeetingFile.fileName(t, TimeZone.getTimeZone("UTC"))));
         check("one line has a time stamp and ends with a newline", "[00:00:05] 안녕하세요\n".equals(MeetingFile.line(t + 5000L, "안녕하세요", seoul)));
