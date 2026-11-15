@@ -109,6 +109,7 @@ public class MainActivity extends Activity
     private int rmsCount = 0;
     private String supportText = "아직 확인 전";
     private Button diagButton;
+    private Button shareButton;
     private ScrollView diagScroll;
     private TextView diagView;
 
@@ -170,6 +171,8 @@ public class MainActivity extends Activity
             onClearPressed();
         } else if (v == diagButton) {
             toggleDiag();
+        } else if (v == shareButton) {
+            shareAll();
         } else if (v == langButton) {
             onLangPressed();
         } else if (v == downloadButton) {
@@ -188,7 +191,8 @@ public class MainActivity extends Activity
         audio = (AudioManager) getSystemService(AUDIO_SERVICE);
         buildUi();
         feedMode = getIntent().getBooleanExtra("feed", false) && FeedSource.clipFile(this) != null;
-        setStatus("시작 버튼을 누르면 받아써요.");
+        setStatus("시작 버튼을 누르면 받아써요.\n1분 확인: ① 시작 ② 10초 말하기 ③ 글자가 나오는지 보기 "
+                + "④ 멈추기 → 클립보드에 복사돼요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
         String crash = CrashShow.lastCrash;
         if (crash != null) {
             if (crash.length() > 300) {
@@ -230,9 +234,12 @@ public class MainActivity extends Activity
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
-        diagButton = makeButton("진단 (입력기 상태 전부 보기)");
+        diagButton = makeButton("진단");
         diagButton.setOnClickListener(this);
+        shareButton = makeButton("공유");
+        shareButton.setOnClickListener(this);
         row2.addView(diagButton, weightParams());
+        row2.addView(shareButton, weightParams());
         root.addView(row2, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -644,6 +651,27 @@ public class MainActivity extends Activity
             startSegment();
         }
         setStatus("인식 언어: " + lang.label());
+    }
+
+    // One tap: hand the whole meeting text to the phone's share sheet (mail, messenger, notes).
+    // The app itself stores nothing; the text only goes where the user sends it.
+    private void shareAll() {
+        String all = screenClip.text();
+        if (all.length() == 0) {
+            Toast.makeText(this, "공유할 내용이 없어요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (all.length() > 500000) {
+            all = all.substring(all.length() - 500000);
+        }
+        try {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_TEXT, all);
+            startActivity(Intent.createChooser(send, "회의 내용 공유"));
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "공유하지 못했어요", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void toggleDiag() {
