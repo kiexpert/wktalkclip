@@ -57,6 +57,7 @@ public class MainActivity extends Activity
     // Stall watchdog: a tick every 200 ms while listening.
     private static final int WHAT_WATCHDOG = 1;
     private static final int WHAT_FLUSH = 2;
+    private static final int WHAT_DIAG = 3;
     // No recognizer callback (rms included) for this long means the recognizer is really stuck.
     private static final long STALL_QUIET_MS = 12000L;
     private static final long MIN_FORCE_RESTART_GAP_MS = 5000L;
@@ -100,6 +101,16 @@ public class MainActivity extends Activity
     private int renderedLines = 0;
     private boolean feedMode = false;
     private TextView composingView;
+    // Diagnostics screen: everything that decides whether dictation works, refreshed every second.
+    private final EventLog eventLog = new EventLog(80);
+    private long sessionStartMs = 0L;
+    private float rmsMin = 99f;
+    private float rmsMax = -99f;
+    private int rmsCount = 0;
+    private String supportText = "아직 확인 전";
+    private Button diagButton;
+    private ScrollView diagScroll;
+    private TextView diagView;
 
     private long lastRmsRenderMs = 0L;
     private long errorWindowStart = 0L;
@@ -157,6 +168,8 @@ public class MainActivity extends Activity
             copyAll();
         } else if (v == clearButton) {
             onClearPressed();
+        } else if (v == diagButton) {
+            toggleDiag();
         } else if (v == langButton) {
             onLangPressed();
         } else if (v == downloadButton) {
@@ -215,6 +228,15 @@ public class MainActivity extends Activity
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        diagButton = makeButton("진단 (입력기 상태 전부 보기)");
+        diagButton.setOnClickListener(this);
+        row2.addView(diagButton, weightParams());
+        root.addView(row2, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
         statusView = new TextView(this);
         statusView.setTextSize(16);
         statusView.setPadding(0, pad, 0, pad / 2);
@@ -247,6 +269,16 @@ public class MainActivity extends Activity
         textBox.setOrientation(LinearLayout.VERTICAL);
         textBox.addView(transcriptView);
         textBox.addView(composingView);
+
+        diagView = new TextView(this);
+        diagView.setTextSize(11);
+        diagView.setTypeface(android.graphics.Typeface.MONOSPACE);
+        diagView.setTextIsSelectable(true);
+        diagScroll = new ScrollView(this);
+        diagScroll.addView(diagView);
+        diagScroll.setVisibility(View.GONE);
+        root.addView(diagScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         scrollView = new ScrollView(this);
         scrollView.addView(textBox);
@@ -286,6 +318,9 @@ public class MainActivity extends Activity
     private void noteEvent(String name) {
         lastEvent = name;
         lastEventMs = System.currentTimeMillis();
+        if (!"partial".equals(name)) {
+            eventLog.add(lastEventMs - sessionStartMs, name);
+        }
     }
 
     // ---- start / stop -------------------------------------------------------
@@ -314,6 +349,11 @@ public class MainActivity extends Activity
 
     private void beginSession() {
         listening = true;
+        sessionStartMs = System.currentTimeMillis();
+        rmsMin = 99f;
+        rmsMax = -99f;
+        rmsCount = 0;
+        eventLog.add(0L, "시작 누름 lang=" + lang.tag());
         restartCount = 0;
         usePipe = false;
         lastEvent = "none";
@@ -482,6 +522,13 @@ public class MainActivity extends Activity
     // Handler.Callback: the watchdog tick is a message, not the Runnable path.
     @Override
     public boolean handleMessage(Message msg) {
+        if (msg.what == WHAT_DIAG) {
+            if (diagScroll.getVisibility() == View.VISIBLE) {
+                refreshDiag();
+                handler.sendEmptyMessageDelayed(WHAT_DIAG, 1000L);
+            }
+            return true;
+        }
         if (msg.what == WHAT_FLUSH) {
             if (listening && !resumed) {
                 flushClip();
@@ -597,6 +644,74 @@ public class MainActivity extends Activity
             startSegment();
         }
         setStatus("인식 언어: " + lang.label());
+    }
+
+    private void toggleDiag() {
+        if (diagScroll.getVisibility() == View.VISIBLE) {
+            diagScroll.setVisibility(View.GONE);
+            handler.removeMessages(WHAT_DIAG);
+            return;
+        }
+        diagScroll.setVisibility(View.VISIBLE);
+        queryModels();
+        refreshDiag();
+        handler.sendEmptyMessageDelayed(WHAT_DIAG, 1000L);
+    }
+
+    // Asks the phone which speech models are installed for the chosen language.
+    private void queryModels() {
+        if (Build.VERSION.SDK_INT < 33) {
+            supportText = "안드로이드 13 미만: 확인 불가";
+            return;
+        }
+        try {
+            ensureRecognizer();
+            recognizer.checkRecognitionSupport(recognizerIntent, getMainExecutor(),
+                    new android.speech.RecognitionSupportCallback() {
+                        @Override
+                        public void onSupportResult(android.speech.RecognitionSupport s) {
+                            supportText = "설치됨=" + s.getInstalledOnDeviceLanguages()
+                                    + " 받는중=" + s.getPendingOnDeviceLanguages()
+                                    + " 받을수있음=" + s.getSupportedOnDeviceLanguages()
+                                    + " 온라인=" + s.getOnlineLanguages();
+                        }
+
+                        @Override
+                        public void onError(int error) {
+                            supportText = "모델 확인 오류 " + ErrorNames.name(error);
+                        }
+                    });
+        } catch (RuntimeException e) {
+            supportText = "모델 확인 실패 " + e.getClass().getSimpleName();
+        }
+    }
+
+    private void refreshDiag() {
+        StringBuilder sb = new StringBuilder();
+        long now = System.currentTimeMillis();
+        sb.append("== 앱 ==\n");
+        sb.append("듣는중=").append(listening).append(" 세션=").append(sessionRunning)
+                .append(" 재시작대기=").append(restartPending).append('\n');
+        sb.append("언어=").append(lang.label()).append('(').append(lang.tag()).append(") 연속오류=")
+                .append(consecutiveErrors).append(" 재시작=").append(restartCount)
+                .append(" 클립쓰기=").append(clipWrites).append('\n');
+        sb.append("마지막 이벤트=").append(lastEvent).append(" (")
+                .append(lastEventMs == 0L ? "-" : String.valueOf((now - lastEventMs) / 1000L)).append("초 전)\n");
+        sb.append("소리크기 받음 ").append(rmsCount).append("회, 최소 ")
+                .append(rmsCount == 0 ? "-" : String.format("%.1f", rmsMin)).append(" 최대 ")
+                .append(rmsCount == 0 ? "-" : String.format("%.1f", rmsMax))
+                .append(" dB (계속 같은 값이면 마이크가 무음)\n");
+        sb.append("음성모델: ").append(supportText).append("\n\n");
+        sb.append("== 폰 ==\n").append(Diag.system(this)).append('\n');
+        sb.append("== 최근 이벤트 (오래된 것부터) ==\n");
+        String[] ev = eventLog.last(40);
+        for (String e : ev) {
+            sb.append(e).append('\n');
+        }
+        if (ev.length == 0) {
+            sb.append("(아직 없음. 시작을 눌러 보세요)\n");
+        }
+        diagView.setText(sb);
     }
 
     private void onDownloadPressed() {
@@ -789,6 +904,13 @@ public class MainActivity extends Activity
         }
         long now = System.currentTimeMillis();
         lastEventMs = now; // proof that the recognizer is alive
+        rmsCount++;
+        if (rmsdB < rmsMin) {
+            rmsMin = rmsdB;
+        }
+        if (rmsdB > rmsMax) {
+            rmsMax = rmsdB;
+        }
         if (now - lastRmsRenderMs < RMS_RENDER_INTERVAL_MS) {
             return;
         }
@@ -823,6 +945,7 @@ public class MainActivity extends Activity
     @Override
     public void onError(int error) {
         noteEvent("err" + error);
+        eventLog.add(System.currentTimeMillis() - sessionStartMs, "오류 " + ErrorNames.name(error));
         sessionRunning = false;
 
         if (error == SpeechRecognizer.ERROR_NO_MATCH
