@@ -4,6 +4,7 @@ On-device Korean speech-to-text for Android. Audio never leaves the phone: no se
 
 ## Rules the app follows
 
+- The language button cycles Korean, English and Auto (Korean and English mixed, Android 14+, depends on the phone's on-device engine).
 - Recognition runs on the device only (`SpeechRecognizer.createOnDeviceSpeechRecognizer`, segmented session, API 33+).
 - Shown text is never erased; a revision is shown as one diff line `± …[-old][+new]…`.
 - Every recognizer error code is shown on screen.

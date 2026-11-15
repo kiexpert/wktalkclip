@@ -254,7 +254,7 @@ public class MainActivity extends Activity
     // Second status line: the recognizer trace. Refreshed by onRmsChanged and the watchdog tick.
     private void updateEventLine() {
         eventView.setText("상태: " + lastEvent + " / running=" + sessionRunning
-                + " / clips=" + clipWrites + " / lang=" + lang.tag() + " / pipe=" + usePipe + " / restarts=" + restartCount);
+                + " / clips=" + clipWrites + " / lang=" + lang.label() + "(" + lang.tag() + ")" + " / pipe=" + usePipe + " / restarts=" + restartCount);
     }
 
     // Records the last callback of the recognizer and when it arrived.
@@ -380,6 +380,21 @@ public class MainActivity extends Activity
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
             i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+            if (lang.isAuto() && Build.VERSION.SDK_INT >= 34) {
+                // Mixed Korean/English meetings: let the on-device recognizer detect the language
+                // and switch between the two while it listens. Needs engine support; if the engine
+                // ignores it the primary language (Korean) is used.
+                ArrayList<String> both = new ArrayList<String>();
+                both.add("ko-KR");
+                both.add("en-US");
+                i.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true);
+                i.putStringArrayListExtra(
+                        RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES, both);
+                i.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH,
+                        RecognizerIntent.LANGUAGE_SWITCH_BALANCED);
+                i.putStringArrayListExtra(
+                        RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, both);
+            }
             if (Build.VERSION.SDK_INT >= 33) {
                 i.putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, true);
                 i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,

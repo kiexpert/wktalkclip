@@ -1,18 +1,22 @@
 package app.wktalkclip;
 
-/** Recognition language: Korean by default, English on request. Both use the on-device recognizer. */
+/** Recognition language: Korean by default, then English, then auto (Korean + English mixed). All on-device. */
 public final class LangChoice {
-    private boolean english = false;
+    private int mode = 0; // 0 Korean, 1 English, 2 auto
 
     public String tag() {
-        return english ? "en-US" : "ko-KR";
+        return mode == 1 ? "en-US" : "ko-KR";
+    }
+
+    public boolean isAuto() {
+        return mode == 2;
     }
 
     public String label() {
-        return english ? "English" : "한국어";
+        return mode == 1 ? "English" : mode == 2 ? "자동" : "한국어";
     }
 
     public void toggle() {
-        english = !english;
+        mode = (mode + 1) % 3;
     }
 }
