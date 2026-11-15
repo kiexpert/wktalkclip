@@ -90,6 +90,19 @@ fi
 $PY ui.py tap "멈추기" >/dev/null; sleep 2
 S=$(screen)
 echo "$S" > "$OUT/screen-$LANGSEL-after-stop.txt"
+# The day's text goes to the share sheet: KakaoTalk is not on the emulator, so the button must fall back to it.
+if [ "$N" -gt 0 ]; then
+  $PY ui.py tap "카톡으로" >/dev/null; sleep 3
+  SH=$(screen); echo "SHARE: $SH"
+  echo "$SH" > "$OUT/screen-$LANGSEL-share.txt"
+  if has "$SH" "회의 내용 공유" || has "$SH" "Share"; then res "PASS 카톡으로 without KakaoTalk opens the share sheet";
+  else res "FAIL 카톡으로 without KakaoTalk did not open the share sheet"; FAILS=$((FAILS+1)); fi
+  if has "$SH" "wktalkclip 20"; then res "PASS shared text starts with the day header";
+  else res "NA day header not visible in the share sheet preview"; fi
+  adb shell input keyevent KEYCODE_BACK; sleep 1
+fi
+# Update banner from the real release check.
+if echo "$S" | grep -q "새 버전 v0.1."; then res "PASS update banner is shown"; else res "NA update banner not seen on this screen"; fi
 C=$(echo "$S" | grep -oE 'clips=[0-9]+' | head -1)
 if [ -z "$C" ]; then res "NA clipboard writes (build has no counter)";
 else res "PASS clipboard counter after $N sentences: $C"; fi
