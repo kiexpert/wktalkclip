@@ -18,7 +18,7 @@ jobs:
         include:
           # RED: the pre-fix source (86627c3) with its language switched to English.
           - name: red-old-en
-            ref: 86627c3
+            ref: 86627c3a83bad2514b72c780d2779d4cf926b83e
             patch: true
             lang: en
             wait: 60
@@ -32,7 +32,7 @@ jobs:
             ref: ${{ github.sha }}
             patch: false
             lang: ko
-            wait: 600
+            wait: 420
     name: voice ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4

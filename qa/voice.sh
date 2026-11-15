@@ -24,7 +24,13 @@ cycle() {  # $1 = label
   S=$(screen)
   if has "$S" "음성 모델 받기"; then
     echo "[$1] model missing, download wait ${WAIT}s"
-    $PY ui.py tap "음성 모델 받기" >/dev/null; sleep "$WAIT"
+    $PY ui.py tap "음성 모델 받기" >/dev/null; sleep 6
+    echo "[$1] system dialog: $(screen)"
+    # The system asks to download the language pack; accept it, then wait for the download.
+    $PY ui.py tap "Download" >/dev/null || true
+    $PY ui.py tap "다운로드" >/dev/null || true
+    sleep "$WAIT"
+    adb shell am start -n $PKG/.MainActivity >/dev/null; sleep 3
     S=$(screen); has "$S" "멈추기" || { $PY ui.py tap "시작" >/dev/null; sleep 6; }
   fi
   sleep 30
