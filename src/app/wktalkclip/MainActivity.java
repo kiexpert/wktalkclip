@@ -56,6 +56,16 @@ public class MainActivity extends Activity
     private static final long SEGMENT_SILENCE_MS = 600000L;
     // Stall watchdog: a tick every 200 ms while listening.
     private static final int WHAT_WATCHDOG = 1;
+    private static final int WHAT_FLUSH = 2;
+    // No recognizer callback (rms included) for this long means the recognizer is really stuck.
+    private static final long STALL_QUIET_MS = 12000L;
+    private static final long MIN_FORCE_RESTART_GAP_MS = 5000L;
+    private static final long NO_MATCH_RESTART_MS = 300L;
+    // While the screen is off the clipboard entry is refreshed this often (one replaced entry), so a
+    // killed process loses at most this much.
+    private static final long FLUSH_WHILE_PAUSED_MS = 15L * 60L * 1000L;
+    private static final int MAX_CLIP_CHARS = 200000;
+    private static final int REQ_NOTIFY = 2;
     private static final long WATCHDOG_TICK_MS = 200L;
     // Restart when no recognizer event for 2 s and sound was heard in the last 2 s,
     // or when no recognizer event for 15 s at all.
@@ -84,6 +94,12 @@ public class MainActivity extends Activity
     // True from a successful startListening() until the recognizer reports
     // results, an error or the end of a segmented session.
     private boolean sessionRunning = false;
+    private int consecutiveErrors = 0;
+    private long lastForceRestartMs = 0L;
+    private boolean resumed = false;
+    private int renderedLines = 0;
+    private boolean feedMode = false;
+    private TextView composingView;
 
     private long lastRmsRenderMs = 0L;
     private long errorWindowStart = 0L;
@@ -158,6 +174,7 @@ public class MainActivity extends Activity
         handler = new Handler(getMainLooper(), this);
         audio = (AudioManager) getSystemService(AUDIO_SERVICE);
         buildUi();
+        feedMode = getIntent().getBooleanExtra("feed", false) && FeedSource.clipFile(this) != null;
         setStatus("시작 버튼을 누르면 받아써요.");
         String crash = CrashShow.lastCrash;
         if (crash != null) {
@@ -223,8 +240,16 @@ public class MainActivity extends Activity
         transcriptView.setTextSize(18);
         transcriptView.setPadding(0, pad / 2, 0, pad / 2);
 
+        composingView = new TextView(this);
+        composingView.setTextSize(18);
+
+        LinearLayout textBox = new LinearLayout(this);
+        textBox.setOrientation(LinearLayout.VERTICAL);
+        textBox.addView(transcriptView);
+        textBox.addView(composingView);
+
         scrollView = new ScrollView(this);
-        scrollView.addView(transcriptView);
+        scrollView.addView(textBox);
         root.addView(scrollView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -300,6 +325,17 @@ public class MainActivity extends Activity
         startButton.setText("멈추기");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         muteBeeps();
+        try {
+            startForegroundService(new Intent(this, RecService.class));
+        } catch (RuntimeException e) {
+            lastEvent = "service " + e.getClass().getSimpleName();
+        }
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { android.Manifest.permission.POST_NOTIFICATIONS },
+                    REQ_NOTIFY);
+        }
         setStatus("회의 중에는 폰 소리를 꺼 둬요");
         startSegment();
         scheduleWatchdog();
@@ -319,6 +355,9 @@ public class MainActivity extends Activity
         }
         sessionRunning = false;
         flushClip();
+        FeedSource.stop();
+        handler.removeMessages(WHAT_FLUSH);
+        stopService(new Intent(this, RecService.class));
         unmuteBeeps();
         startButton.setText("시작");
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -414,7 +453,21 @@ public class MainActivity extends Activity
             return;
         }
         try {
-            recognizer.startListening(recognizerIntent);
+            Intent go = recognizerIntent;
+            if (feedMode) {
+                // QA only: hear a prerecorded clip pushed into this app's own files folder instead
+                // of the microphone. Off unless the launch intent asks for it and the clip exists.
+                android.os.ParcelFileDescriptor fd = FeedSource.open(FeedSource.clipFile(this), null);
+                if (fd != null) {
+                    go = new Intent(recognizerIntent);
+                    go.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, fd);
+                    go.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1);
+                    go.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING,
+                            android.media.AudioFormat.ENCODING_PCM_16BIT);
+                    go.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, 16000);
+                }
+            }
+            recognizer.startListening(go);
         } catch (RuntimeException e) {
             setStatus("마이크를 열지 못했어요: " + e.getClass().getSimpleName());
             noteEvent("startFail");
@@ -429,6 +482,13 @@ public class MainActivity extends Activity
     // Handler.Callback: the watchdog tick is a message, not the Runnable path.
     @Override
     public boolean handleMessage(Message msg) {
+        if (msg.what == WHAT_FLUSH) {
+            if (listening && !resumed) {
+                flushClip();
+                handler.sendEmptyMessageDelayed(WHAT_FLUSH, FLUSH_WHILE_PAUSED_MS);
+            }
+            return true;
+        }
         if (msg.what != WHAT_WATCHDOG) {
             return false;
         }
@@ -449,9 +509,11 @@ public class MainActivity extends Activity
         }
         long now = System.currentTimeMillis();
         long quiet = now - lastEventMs;
-        boolean soundRecent = now - lastSoundMs < STALL_WITH_SOUND_MS;
-        boolean stalled = quiet > STALL_ANY_MS || (quiet > STALL_WITH_SOUND_MS && soundRecent);
-        if (stalled && !restartPending && recognizer != null) {
+        // rms callbacks also refresh lastEventMs, so this only fires when the recognizer is silent
+        // in every way for a long time, not while someone merely pauses or speaks fast.
+        boolean stalled = quiet > STALL_QUIET_MS;
+        if (stalled && !restartPending && recognizer != null
+                && Backoff.mayRestart(now, lastForceRestartMs, MIN_FORCE_RESTART_GAP_MS)) {
             forceRestart();
         }
         updateEventLine();
@@ -462,6 +524,7 @@ public class MainActivity extends Activity
     // as a line marked as a stall, so nothing heard is hidden.
     private void forceRestart() {
         restartCount++;
+        lastForceRestartMs = System.currentTimeMillis();
         noteEvent("stall");
         recognizer.cancel();
         recognizer.destroy();
@@ -484,8 +547,16 @@ public class MainActivity extends Activity
             sb.append(line).append('\n');
         }
         ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("회의 받아쓰기", sb.toString()));
-        Toast.makeText(this, "복사했어요", Toast.LENGTH_SHORT).show();
+        try {
+            String all = sb.toString();
+            if (all.length() > MAX_CLIP_CHARS) {
+                all = all.substring(all.length() - MAX_CLIP_CHARS);
+            }
+            cm.setPrimaryClip(ClipData.newPlainText("회의 받아쓰기", all));
+            Toast.makeText(this, "복사했어요", Toast.LENGTH_SHORT).show();
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "복사하지 못했어요", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void onClearPressed() {
@@ -553,22 +624,37 @@ public class MainActivity extends Activity
 
     // ---- display ------------------------------------------------------------
 
-    // Finished lines, then the grey composing line with the debug marker at its end only.
+    // Finished lines are appended once to their own view and never rebuilt; only the small grey
+    // composing line is redrawn on a partial result. Nothing is drawn while the app is hidden;
+    // onResume draws what was missed. This keeps a 3 hour meeting as fast as the first minute.
     private void render() {
-        SpannableStringBuilder sb = new SpannableStringBuilder();
-        for (String line : lines) {
-            sb.append(line).append('\n');
+        if (!resumed) {
+            return;
+        }
+        if (renderedLines > lines.size()) {
+            transcriptView.setText("");
+            renderedLines = 0;
+        }
+        boolean grew = false;
+        while (renderedLines < lines.size()) {
+            transcriptView.append(lines.get(renderedLines));
+            transcriptView.append("\n");
+            renderedLines++;
+            grew = true;
         }
         if (shown.length() > 0) {
             long now = System.currentTimeMillis();
-            int start = sb.length();
-            sb.append(shown);
+            SpannableStringBuilder sb = new SpannableStringBuilder(shown);
             sb.append(" ⟨" + partialCount + "p " + (now - lastEventMs) + "ms " + lastEvent + "⟩");
-            sb.setSpan(new ForegroundColorSpan(Color.GRAY), start, sb.length(),
+            sb.setSpan(new ForegroundColorSpan(Color.GRAY), 0, sb.length(),
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            composingView.setText(sb);
+        } else {
+            composingView.setText("");
         }
-        transcriptView.setText(sb);
-        scrollView.fullScroll(View.FOCUS_DOWN);
+        if (grew || shown.length() > 0) {
+            scrollView.fullScroll(View.FOCUS_DOWN);
+        }
     }
 
     private static String firstMatch(Bundle b) {
@@ -597,6 +683,19 @@ public class MainActivity extends Activity
         screenClip.add(text);
     }
 
+    // Display line whose text is not (or no longer) the best guess: shown, never copied.
+    private void addDisplayLine(String text) {
+        lines.add("[" + nowText() + "] " + text);
+    }
+
+    private void commitShownDisplayOnly() {
+        if (shown.length() > 0) {
+            addDisplayLine(shown);
+        }
+        shown = "";
+        partialCount = 0;
+    }
+
     private void flushClip() {
         if (!screenClip.needsWrite()) {
             return;
@@ -604,7 +703,11 @@ public class MainActivity extends Activity
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", screenClip.text()));
+                String t = screenClip.text();
+                if (t.length() > MAX_CLIP_CHARS) {
+                    t = t.substring(t.length() - MAX_CLIP_CHARS); // the clipboard has a size limit
+                }
+                cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", t));
                 screenClip.markWritten();
                 clipWrites++;
             }
@@ -617,7 +720,8 @@ public class MainActivity extends Activity
     // The caller renders.
     private void commitShown(String suffix) {
         if (shown.length() > 0) {
-            addLine(shown + suffix);
+            lines.add("[" + nowText() + "] " + shown + suffix);
+            screenClip.add(shown);
         }
         shown = "";
         partialCount = 0;
@@ -652,8 +756,11 @@ public class MainActivity extends Activity
             partialCount = 0;
         } else {
             String d = diffLine(shown, f);
-            commitShown("");
+            commitShownDisplayOnly();
             lines.add(d);
+            addLine(f);
+            shown = "";
+            partialCount = 0;
         }
         render();
     }
@@ -681,6 +788,7 @@ public class MainActivity extends Activity
             return;
         }
         long now = System.currentTimeMillis();
+        lastEventMs = now; // proof that the recognizer is alive
         if (now - lastRmsRenderMs < RMS_RENDER_INTERVAL_MS) {
             return;
         }
@@ -719,11 +827,13 @@ public class MainActivity extends Activity
 
         if (error == SpeechRecognizer.ERROR_NO_MATCH
                 || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-            // Normal end of an utterance: keep what was heard as a line, then restart.
+            // Normal end of an utterance or a quiet stretch: keep what was heard, then restart
+            // after a short fixed pause so a silent or muted input cannot spin the CPU.
             commitShown("");
             render();
             if (listening) {
-                startSegment();
+                restartPending = true;
+                handler.postDelayed(this, NO_MATCH_RESTART_MS);
             }
             return;
         }
@@ -739,43 +849,45 @@ public class MainActivity extends Activity
             return;
         }
 
-        if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || !listening) {
+        if (!listening) {
             commitShown(" …(e" + error + ")");
             render();
             endSession("인식 오류 " + error + ". 시작 버튼을 다시 눌러 주세요.");
             return;
         }
 
-        // Client (5) and busy (8) errors carry the code as "(eN)". Other errors use an ellipsis
-        // and the code. Nothing is hidden: the code is always in the line.
+        if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            commitShown(" …(e" + error + ")");
+            render();
+            endSession("마이크 권한이 없어요. 시작을 눌러 허용해 주세요.");
+            return;
+        }
+
+        // Every other error is treated as temporary (busy, client, server, a phone call, the app
+        // in the background). The recording is never given up: retry with a growing pause, up
+        // to 30 s, and show the code. A successful result resets the pause.
         boolean clientOrBusy = error == SpeechRecognizer.ERROR_CLIENT
                 || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY;
         commitShown(clientOrBusy ? " (e" + error + ")" : " …(e" + error + ")");
         render();
 
-        long now = System.currentTimeMillis();
-        if (now - errorWindowStart > ERROR_WINDOW_MS) {
-            errorWindowStart = now;
-            errorCount = 0;
-        }
-        errorCount++;
-        if (errorCount > ERROR_LIMIT) {
-            endSession("인식기가 계속 실패해요(오류 " + error + "). 다시 눌러 주세요.");
-            return;
-        }
-
-        setStatus("인식 오류 " + error + ". 인식기를 다시 만들어요.");
+        long wait = Backoff.delayMs(consecutiveErrors);
+        consecutiveErrors++;
+        setStatus("인식 오류 " + error + ". " + (wait / 1000L) + "초 뒤 다시 시도해요.");
         if (recognizer != null) {
             recognizer.destroy();
             recognizer = null;
         }
         restartPending = true;
-        handler.postDelayed(this, RESTART_DELAY_MS);
+        handler.postDelayed(this, Math.max(wait, RESTART_DELAY_MS));
     }
 
     @Override
     public void onResults(Bundle results) {
         noteEvent("result");
+        consecutiveErrors = 0;
         sessionRunning = false;
         if (Build.VERSION.SDK_INT < 33) {
             if (listening) {
@@ -796,6 +908,7 @@ public class MainActivity extends Activity
     @Override
     public void onSegmentResults(Bundle segmentResults) {
         noteEvent("segment");
+        consecutiveErrors = 0;
         commitFinal(segmentResults);
     }
 
@@ -815,6 +928,7 @@ public class MainActivity extends Activity
     @Override
     public void onPartialResults(Bundle partialResults) {
         noteEvent("partial");
+        consecutiveErrors = 0;
         String p = firstMatch(partialResults);
         if (p.length() == 0) {
             return; // never erase on an empty guess
@@ -823,7 +937,7 @@ public class MainActivity extends Activity
             shown = p;
         } else {
             String d = diffLine(shown, p);
-            commitShown("");
+            commitShownDisplayOnly();
             lines.add(d);
             shown = p;
         }
@@ -838,7 +952,12 @@ public class MainActivity extends Activity
 
     @Override
     protected void onPause() {
+        resumed = false;
         flushClip();
+        if (listening) {
+            handler.removeMessages(WHAT_FLUSH);
+            handler.sendEmptyMessageDelayed(WHAT_FLUSH, FLUSH_WHILE_PAUSED_MS);
+        }
         super.onPause();
     }
 
@@ -847,6 +966,9 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
+        handler.removeMessages(WHAT_FLUSH);
+        render();
         if (!listening) {
             return;
         }
@@ -867,6 +989,8 @@ public class MainActivity extends Activity
     @Override
     protected void onDestroy() {
         flushClip();
+        FeedSource.stop();
+        stopService(new Intent(this, RecService.class));
         restartPending = false;
         listening = false;
         handler.removeCallbacksAndMessages(null);

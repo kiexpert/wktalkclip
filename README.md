@@ -10,6 +10,14 @@ On-device Korean speech-to-text for Android. Audio never leaves the phone: no se
 - Every recognizer error code is shown on screen.
 - Media playback volume (STREAM_MUSIC) is never muted; only the start beep streams are.
 
+## Long meetings
+
+- Recording runs as a microphone foreground service with a notification and a CPU wake lock, so it keeps going with the screen off or the phone in a pocket.
+- A recognizer error never ends the meeting: it is retried with a growing pause (200 ms up to 30 s) and the error code stays visible.
+- The screen draws each finished line once and only redraws the small grey composing line, so hour 3 is as fast as minute 1.
+- While the screen is off the single clipboard entry is refreshed every 15 minutes (replaced, not added to). It keeps the last 200000 characters because the clipboard has a size limit; the screen keeps everything.
+- Final recognizer text goes to the clipboard; superseded partial guesses are shown on screen but not copied.
+
 ## Build (no Gradle)
 
 Needs JDK 11+, Android SDK platform 34 and build-tools 34.0.0 (set `ANDROID_SDK`, default `./sdk`).
