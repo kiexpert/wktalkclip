@@ -10,6 +10,6 @@ What is in this build
 Proof by run id
 - Item 1, recognition without a phone: Emulator feed QA run 43707801543, job "feed en online" passed: the app's sound-in to text-out path produced "hello everyone let us start the meeting the first item is the schedule". This used a CI-only copy of the app with the online recognizer; the shipped app is on-device only. The on-device engine could not be tested: the emulator has no speech model (job "feed en ondevice" failed, no download dialog in 5 minutes). Korean: job "feed ko online" failed with an empty transcript.
 - Item 2, calls and 3 hour restarts: unit tests MeetingPause (21) and the simulated soak, both in run 43709558197.
-- Item 4, owner check: on the app's first screen and on the download page.
+- Item 4, one-minute check: on the app's first screen and on the download page.
 
 Not verified on a phone: dictation itself, screen-off recording, mixed-language accuracy, call pause. Open the diagnostics screen and send a screenshot if nothing is printed.
