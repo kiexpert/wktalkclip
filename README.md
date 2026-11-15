@@ -16,6 +16,7 @@ On-device Korean speech-to-text for Android. Audio never leaves the phone: no se
 - A recognizer error never ends the meeting: it is retried with a growing pause (200 ms up to 30 s) and the error code stays visible.
 - The screen draws each finished line once and only redraws the small grey composing line, so hour 3 is as fast as minute 1.
 - While the screen is off the single clipboard entry is refreshed every 15 minutes (replaced, not added to). The clipboard has a size limit (200000 characters): if the day is longer, the oldest text of the day is dropped first and the current meeting is kept; the screen keeps everything.
+- The share buttons send the day's whole text as plain text: `공유` opens the system share sheet, `카톡으로` goes straight to KakaoTalk if it is installed (otherwise the share sheet). No file, no Kakao SDK, no extra permission.
 - Final recognizer text goes to the clipboard; superseded partial guesses are shown on screen but not copied.
 
 ## Build (no Gradle)

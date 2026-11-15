@@ -110,6 +110,7 @@ public class MainActivity extends Activity
     private String supportText = "아직 확인 전";
     private Button diagButton;
     private Button shareButton;
+    private Button kakaoButton;
     // A phone call or voice-call app pauses the meeting; it restarts by itself when the call ends.
     private final MeetingPause meetingPause = new MeetingPause();
     private FocusGuard focusGuard;
@@ -176,7 +177,9 @@ public class MainActivity extends Activity
         } else if (v == diagButton) {
             toggleDiag();
         } else if (v == shareButton) {
-            shareAll();
+            shareAll(false);
+        } else if (v == kakaoButton) {
+            shareAll(true);
         } else if (v == langButton) {
             onLangPressed();
         } else if (v == downloadButton) {
@@ -196,7 +199,7 @@ public class MainActivity extends Activity
         buildUi();
         feedMode = getIntent().getBooleanExtra("feed", false) && FeedSource.clipFile(this) != null;
         setStatus("시작 버튼을 누르면 받아써요.\n1분 확인: ① 시작 ② 10초 말하기 ③ 글자가 나오는지 보기 "
-                + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸). 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
+                + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸) ⑤ 카톡으로 → 그날 전체를 카카오톡으로 보내요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
         String crash = CrashShow.lastCrash;
         if (crash != null) {
             if (crash.length() > 300) {
@@ -242,8 +245,11 @@ public class MainActivity extends Activity
         diagButton.setOnClickListener(this);
         shareButton = makeButton("공유");
         shareButton.setOnClickListener(this);
+        kakaoButton = makeButton("카톡으로");
+        kakaoButton.setOnClickListener(this);
         row2.addView(diagButton, weightParams());
         row2.addView(shareButton, weightParams());
+        row2.addView(kakaoButton, weightParams());
         root.addView(row2, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -723,21 +729,45 @@ public class MainActivity extends Activity
         setStatus("인식 언어: " + lang.label());
     }
 
-    // One tap: hand the whole meeting text to the phone's share sheet (mail, messenger, notes).
-    // The app itself stores nothing; the text only goes where the user sends it.
-    private void shareAll() {
+    // One tap: hand today's whole clipboard entry (date header included) to the phone's share
+    // sheet, or straight to KakaoTalk with the 카톡으로 button. Plain text only: no file, no
+    // Kakao SDK, no permission. If KakaoTalk is missing or refuses, the system share sheet opens.
+    private void shareAll(boolean kakao) {
         String all = dayClip.text(500000);
-        if (all.length() == 0) {
+        if (ShareRoute.nothingToShare(all)) {
             Toast.makeText(this, "공유할 내용이 없어요.", Toast.LENGTH_SHORT).show();
             return;
         }
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_TEXT, all);
+        ShareRoute.Route route = kakao ? ShareRoute.route(kakaoInstalled()) : ShareRoute.Route.CHOOSER;
+        if (route == ShareRoute.Route.KAKAO) {
+            try {
+                Intent direct = new Intent(send);
+                direct.setPackage(ShareRoute.KAKAO_PACKAGE);
+                startActivity(direct);
+                return;
+            } catch (RuntimeException e) {
+                route = ShareRoute.afterFailure();
+                lastEvent = "kakao failed " + e.getClass().getSimpleName();
+            }
+        }
         try {
-            Intent send = new Intent(Intent.ACTION_SEND);
-            send.setType("text/plain");
-            send.putExtra(Intent.EXTRA_TEXT, all);
             startActivity(Intent.createChooser(send, "회의 내용 공유"));
         } catch (RuntimeException e) {
             Toast.makeText(this, "공유하지 못했어요", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean kakaoInstalled() {
+        try {
+            getPackageManager().getPackageInfo(ShareRoute.KAKAO_PACKAGE, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 

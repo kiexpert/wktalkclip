@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="app.wktalkclip"
-android:versionCode="20"
-    android:versionName="1.18">
+android:versionCode="21"
+    android:versionName="1.19">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -11,6 +11,7 @@ android:versionCode="20"
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
+        <package android:name="com.kakao.talk" />
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
