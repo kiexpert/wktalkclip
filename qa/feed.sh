@@ -56,6 +56,8 @@ launch
 pick_lang
 $PY ui.py tap "시작" >/dev/null; sleep 6
 S=$(screen)
+echo "[start] right after the first Start: $S"
+adb logcat -d | grep -E "FATAL|AndroidRuntime|app.wktalkclip|SpeechRecogn|RecognitionService" | tail -25 | sed 's/^/LOG: /'
 # After the model is ready the app may still show 시작 (the earlier try ended); press it again.
 if ! has "$S" "멈추기"; then $PY ui.py tap "시작" >/dev/null; sleep 6; fi
 # The clip loops; give the recognizer up to ~90 s to commit a transcript line.

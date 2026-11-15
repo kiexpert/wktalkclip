@@ -451,6 +451,7 @@ public class MainActivity extends Activity
         }
         sessionRunning = false;
         flushClip();
+        updateEventLine(); // the watchdog is stopped now, so refresh the clips= counter here
         FeedSource.stop();
         handler.removeMessages(WHAT_FLUSH);
         stopService(new Intent(this, RecService.class));
