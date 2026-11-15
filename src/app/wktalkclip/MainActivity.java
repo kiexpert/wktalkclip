@@ -111,6 +111,12 @@ public class MainActivity extends Activity
     private Button diagButton;
     private Button shareButton;
     private Button kakaoButton;
+    private Button updateButton;
+    private Button updateBanner;
+    // In-app update: the time of the last check lives in memory only (no file), once per 6 hours.
+    private static long lastUpdateCheckMs = 0L;
+    private String newApkUrl = null;
+    private boolean updating = false;
     // A phone call or voice-call app pauses the meeting; it restarts by itself when the call ends.
     private final MeetingPause meetingPause = new MeetingPause();
     private FocusGuard focusGuard;
@@ -180,6 +186,10 @@ public class MainActivity extends Activity
             shareAll(false);
         } else if (v == kakaoButton) {
             shareAll(true);
+        } else if (v == updateButton) {
+            checkForUpdate(true);
+        } else if (v == updateBanner) {
+            startUpdate();
         } else if (v == langButton) {
             onLangPressed();
         } else if (v == downloadButton) {
@@ -198,8 +208,9 @@ public class MainActivity extends Activity
         audio = (AudioManager) getSystemService(AUDIO_SERVICE);
         buildUi();
         feedMode = getIntent().getBooleanExtra("feed", false) && FeedSource.clipFile(this) != null;
+        checkForUpdate(false);
         setStatus("시작 버튼을 누르면 받아써요.\n1분 확인: ① 시작 ② 10초 말하기 ③ 글자가 나오는지 보기 "
-                + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸) ⑤ 카톡으로 → 그날 전체를 카카오톡으로 보내요. 지우기는 화면만 지우고 그날의 클립보드 항목은 그대로 남아요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
+                + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸) ⑤ 카톡으로 → 그날 전체를 카카오톡으로 보내요 ⑥ 새 버전이 있으면 위에 배너가 떠요, 누르면 앱 안에서 받아 설치해요. 지우기는 화면만 지우고 그날의 클립보드 항목은 그대로 남아요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
         String crash = CrashShow.lastCrash;
         if (crash != null) {
             if (crash.length() > 300) {
@@ -247,10 +258,20 @@ public class MainActivity extends Activity
         shareButton.setOnClickListener(this);
         kakaoButton = makeButton("카톡으로");
         kakaoButton.setOnClickListener(this);
+        updateButton = makeButton("새 버전");
+        updateButton.setOnClickListener(this);
         row2.addView(diagButton, weightParams());
         row2.addView(shareButton, weightParams());
         row2.addView(kakaoButton, weightParams());
+        row2.addView(updateButton, weightParams());
         root.addView(row2, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        updateBanner = makeButton("");
+        updateBanner.setVisibility(View.GONE);
+        updateBanner.setOnClickListener(this);
+        root.addView(updateBanner, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -758,6 +779,99 @@ public class MainActivity extends Activity
         } catch (RuntimeException e) {
             Toast.makeText(this, "공유하지 못했어요", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // ---- in-app update ----------------------------------------------------------
+
+    private int myVersionCode() {
+        try {
+            return (int) getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode();
+        } catch (PackageManager.NameNotFoundException e) {
+            return Integer.MAX_VALUE;
+        } catch (RuntimeException e) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    // Asks the public release page whether a newer version exists. Shows a banner when it does.
+    // manual: the user pressed 새 버전, so say what happened even when nothing is new.
+    private void checkForUpdate(final boolean manual) {
+        long now = System.currentTimeMillis();
+        if (!manual && !UpdateCheck.dueForCheck(now, lastUpdateCheckMs)) {
+            return;
+        }
+        lastUpdateCheckMs = now;
+        UpdateNet.fetchLatest(handler, new UpdateNet.Latest() {
+            @Override
+            public void onLatest(String tag, String apkUrl) {
+                if (UpdateCheck.decide(myVersionCode(), tag, false) == UpdateCheck.Decision.NEWER) {
+                    newApkUrl = apkUrl;
+                    updateBanner.setText("새 버전 " + tag + " 설치 (누르면 받아서 설치해요)");
+                    updateBanner.setVisibility(View.VISIBLE);
+                    if (manual) {
+                        Toast.makeText(MainActivity.this, "새 버전이 있어요: " + tag, Toast.LENGTH_SHORT).show();
+                    }
+                } else if (manual) {
+                    Toast.makeText(MainActivity.this, "지금이 최신 버전이에요.", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override
+            public void onFail() {
+                if (manual) {
+                    Toast.makeText(MainActivity.this, "확인하지 못했어요. 인터넷을 확인해 주세요.",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    // Downloads the new APK from github.com straight into the system installer. The day's
+    // clipboard entry is written first because installing restarts the app.
+    private void startUpdate() {
+        if (updating) {
+            return;
+        }
+        if (listening) {
+            Toast.makeText(this, "회의를 멈춘 뒤에 설치해 주세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            Toast.makeText(this, "먼저 '이 앱에서 설치 허용'을 켜 주세요. 그 뒤 다시 눌러 주세요.", Toast.LENGTH_LONG).show();
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:" + getPackageName())));
+            } catch (RuntimeException e) {
+                lastEvent = "install settings failed";
+            }
+            return;
+        }
+        flushClip();
+        updating = true;
+        final String url = newApkUrl == null ? UpdateNet.FALLBACK_APK : newApkUrl;
+        setStatus("새 버전을 받아요...");
+        UpdateNet.install(this, url, handler, new UpdateNet.Progress() {
+            @Override
+            public void onText(String text) {
+                setStatus(text);
+            }
+
+            @Override
+            public void onDone(boolean started) {
+                updating = false;
+                if (started) {
+                    setStatus("받았어요. 설치 화면에서 '설치'를 눌러 주세요.");
+                } else {
+                    // The API or the download failed: open the APK address itself.
+                    setStatus("앱 안에서 받지 못해서 파일 주소를 열어요.");
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(UpdateNet.FALLBACK_APK)));
+                    } catch (RuntimeException e) {
+                        Toast.makeText(MainActivity.this, "열지 못했어요", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        });
     }
 
     private boolean kakaoInstalled() {

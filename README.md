@@ -1,6 +1,13 @@
 # wktalkclip
 
-On-device Korean speech-to-text for Android. Audio never leaves the phone: no server traffic and no files written. One day is one clipboard entry: every meeting of the same calendar day is merged into a single entry (a time header per meeting, a new day starts a fresh entry), written when the app is paused or stopped, so the clipboard history is not filled with one entry per sentence or per meeting. The entry starts with a line like `[wktalkclip 2026-11-16]`; after the app was killed, the next Start on the same day continues from that entry if it is still in the clipboard.
+On-device Korean speech-to-text for Android. Audio and text never leave the phone and no files are written. The only network use is the update check: the app reads the latest release of this public repository and downloads its APK from github.com, nothing else. One day is one clipboard entry: every meeting of the same calendar day is merged into a single entry (a time header per meeting, a new day starts a fresh entry), written when the app is paused or stopped, so the clipboard history is not filled with one entry per sentence or per meeting. The entry starts with a line like `[wktalkclip 2026-11-16]`; after the app was killed, the next Start on the same day continues from that entry if it is still in the clipboard.
+
+## Permissions
+
+- Microphone: dictation.
+- Notifications and foreground service: the "recording" notification that keeps a long meeting alive with the screen off.
+- Internet (`INTERNET`): only to check the latest release on github.com and download the new APK. Audio and transcript are never sent.
+- Install packages (`REQUEST_INSTALL_PACKAGES`): so the app can hand the downloaded update to the system installer; Android asks you to allow it once. The update is signed with the same key, so it installs over the current app and keeps its settings. The APK is streamed straight to the installer, no file is created.
 
 ## Rules the app follows
 
