@@ -39,7 +39,7 @@ warmup() {
   if has "$(screen)" "음성 모델 받기"; then
     echo "[warmup] model missing, download wait ${WAIT}s"
     $PY ui.py tap "음성 모델 받기" >/dev/null
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    for i in $(seq 1 "${DIALOG_POLLS:-12}"); do
       sleep 5
       D=$(screen); echo "[warmup] dialog check $i: $D"
       T=$($PY ui.py tap "Download")
