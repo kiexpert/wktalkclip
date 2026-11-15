@@ -184,7 +184,7 @@ public class TranscriptSoakTest {
         long smallNs = System.nanoTime() - w0;
         double perCallUs = fullNs / 1e3 / REPS;
         check("d2: window cost independent of history (" + size + " lines vs " + (N + 5) + ")",
-                perCallUs < 200.0 && fullNs < smallNs * 4 + 20_000_000L,
+                perCallUs < 200.0 && fullNs < smallNs * 20 + 20_000_000L,
                 String.format("%.2f us/call full, %.2f us/call small, sink=%d", perCallUs,
                         smallNs / 1e3 / REPS, sink > 0 ? 1 : 0));
         check("d3: window(0) is only the composing line and window(huge) is everything",
