@@ -80,7 +80,7 @@ public class MainActivity extends Activity
     private final ArrayList<String> lines = new ArrayList<String>();
     // The same sentences as one clipboard entry for this screen. Written on pause or stop, replaced
     // each time, so the clipboard history gets one entry per screen and not one per sentence.
-    private final ScreenClip screenClip = new ScreenClip();
+    private final DayClip dayClip = new DayClip();
     private final LangChoice lang = new LangChoice();
     // Number of clipboard writes this run, shown in the debug line so one entry per screen can be checked.
     private int clipWrites = 0;
@@ -196,7 +196,7 @@ public class MainActivity extends Activity
         buildUi();
         feedMode = getIntent().getBooleanExtra("feed", false) && FeedSource.clipFile(this) != null;
         setStatus("시작 버튼을 누르면 받아써요.\n1분 확인: ① 시작 ② 10초 말하기 ③ 글자가 나오는지 보기 "
-                + "④ 멈추기 → 클립보드에 복사돼요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
+                + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸). 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
         String crash = CrashShow.lastCrash;
         if (crash != null) {
             if (crash.length() > 300) {
@@ -361,6 +361,22 @@ public class MainActivity extends Activity
     private void beginSession() {
         listening = true;
         sessionStartMs = System.currentTimeMillis();
+        // Same calendar day: this meeting is appended to the day's one clipboard entry. After a
+        // restart the day's text is recovered from the clipboard if it is this app's own entry.
+        String clipNow = "";
+        try {
+            ClipboardManager cm0 = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            ClipData d0 = cm0 == null ? null : cm0.getPrimaryClip();
+            if (d0 != null && d0.getItemCount() > 0) {
+                CharSequence c0 = d0.getItemAt(0).coerceToText(this);
+                clipNow = c0 == null ? "" : c0.toString();
+            }
+        } catch (RuntimeException e) {
+            lastEvent = "clip read failed";
+        }
+        Date nowD = new Date();
+        dayClip.startMeeting(new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(nowD),
+                new SimpleDateFormat("HH:mm", Locale.US).format(nowD), clipNow);
         rmsMin = 99f;
         rmsMax = -99f;
         rmsCount = 0;
@@ -681,7 +697,6 @@ public class MainActivity extends Activity
         clearArmed = false;
         clearButton.setText("지우기");
         lines.clear();
-        screenClip.clear();
         shown = "";
         partialCount = 0;
         render();
@@ -711,13 +726,10 @@ public class MainActivity extends Activity
     // One tap: hand the whole meeting text to the phone's share sheet (mail, messenger, notes).
     // The app itself stores nothing; the text only goes where the user sends it.
     private void shareAll() {
-        String all = screenClip.text();
+        String all = dayClip.text(500000);
         if (all.length() == 0) {
             Toast.makeText(this, "공유할 내용이 없어요.", Toast.LENGTH_SHORT).show();
             return;
-        }
-        if (all.length() > 500000) {
-            all = all.substring(all.length() - 500000);
         }
         try {
             Intent send = new Intent(Intent.ACTION_SEND);
@@ -881,27 +893,9 @@ public class MainActivity extends Activity
         clipAdd(text);
     }
 
-    // A finished sentence joins this screen's clipboard entry, and, only when Features.SAVE_MEETING_FILE
-    // is switched on, is also appended to the dated meeting file in the app's private folder.
+    // A finished sentence joins today's single clipboard entry (see DayClip). The app writes no files.
     private void clipAdd(String text) {
-        screenClip.add(text);
-        if (Features.SAVE_MEETING_FILE) {
-            String l = MeetingFile.line(System.currentTimeMillis(), text, java.util.TimeZone.getDefault());
-            if (l.length() > 0) {
-                try {
-                    java.io.File f = new java.io.File(getFilesDir(),
-                            MeetingFile.fileName(System.currentTimeMillis(), java.util.TimeZone.getDefault()));
-                    java.io.FileOutputStream out = new java.io.FileOutputStream(f, true);
-                    try {
-                        out.write(l.getBytes("UTF-8"));
-                    } finally {
-                        out.close();
-                    }
-                } catch (java.io.IOException e) {
-                    lastEvent = "file failed";
-                }
-            }
-        }
+        dayClip.add(text);
     }
 
     // Display line whose text is not (or no longer) the best guess: shown, never copied.
@@ -918,18 +912,15 @@ public class MainActivity extends Activity
     }
 
     private void flushClip() {
-        if (!screenClip.needsWrite()) {
+        if (!dayClip.needsWrite()) {
             return;
         }
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             if (cm != null) {
-                String t = screenClip.text();
-                if (t.length() > MAX_CLIP_CHARS) {
-                    t = t.substring(t.length() - MAX_CLIP_CHARS); // the clipboard has a size limit
-                }
-                cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", t));
-                screenClip.markWritten();
+                // The clipboard has a size limit: DayClip drops the oldest text of the day first.
+                cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", dayClip.text(MAX_CLIP_CHARS)));
+                dayClip.markWritten();
                 clipWrites++;
             }
         } catch (RuntimeException e) {
