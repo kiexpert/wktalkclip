@@ -117,6 +117,7 @@ public class MainActivity extends Activity
     private static long lastUpdateCheckMs = 0L;
     private String newApkUrl = null;
     private boolean updating = false;
+    private boolean checkingUpdate = false;
     // A phone call or voice-call app pauses the meeting; it restarts by itself when the call ends.
     private final MeetingPause meetingPause = new MeetingPause();
     private FocusGuard focusGuard;
@@ -208,7 +209,6 @@ public class MainActivity extends Activity
         audio = (AudioManager) getSystemService(AUDIO_SERVICE);
         buildUi();
         feedMode = getIntent().getBooleanExtra("feed", false) && FeedSource.clipFile(this) != null;
-        checkForUpdate(false);
         setStatus("시작 버튼을 누르면 받아써요.\n1분 확인: ① 시작 ② 10초 말하기 ③ 글자가 나오는지 보기 "
                 + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸) ⑤ 카톡으로 → 그날 전체를 카카오톡으로 보내요 ⑥ 새 버전이 있으면 위에 배너가 떠요, 누르면 앱 안에서 받아 설치해요. 지우기는 화면만 지우고 그날의 클립보드 항목은 그대로 남아요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
         String crash = CrashShow.lastCrash;
@@ -756,6 +756,7 @@ public class MainActivity extends Activity
     private void shareAll(boolean kakao) {
         String all = dayClip.text(500000);
         if (ShareRoute.nothingToShare(all)) {
+            setStatus("공유할 내용이 없어요.");
             Toast.makeText(this, "공유할 내용이 없어요.", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -797,13 +798,17 @@ public class MainActivity extends Activity
     // manual: the user pressed 새 버전, so say what happened even when nothing is new.
     private void checkForUpdate(final boolean manual) {
         long now = System.currentTimeMillis();
-        if (!manual && !UpdateCheck.dueForCheck(now, lastUpdateCheckMs)) {
+        if (checkingUpdate || (!manual && !UpdateCheck.dueForCheck(now, lastUpdateCheckMs))) {
             return;
         }
-        lastUpdateCheckMs = now;
+        checkingUpdate = true;
         UpdateNet.fetchLatest(handler, new UpdateNet.Latest() {
             @Override
             public void onLatest(String tag, String apkUrl) {
+                // Only a check that really reached the release page counts as done: a failed one
+                // (no network yet) is retried the next time the app comes to the front.
+                checkingUpdate = false;
+                lastUpdateCheckMs = System.currentTimeMillis();
                 if (UpdateCheck.decide(myVersionCode(), tag, false) == UpdateCheck.Decision.NEWER) {
                     newApkUrl = apkUrl;
                     updateBanner.setText("새 버전 " + tag + " 설치 (누르면 받아서 설치해요)");
@@ -818,6 +823,7 @@ public class MainActivity extends Activity
 
             @Override
             public void onFail() {
+                checkingUpdate = false;
                 if (manual) {
                     Toast.makeText(MainActivity.this, "확인하지 못했어요. 인터넷을 확인해 주세요.",
                             Toast.LENGTH_SHORT).show();
@@ -1331,6 +1337,7 @@ public class MainActivity extends Activity
     protected void onResume() {
         super.onResume();
         resumed = true;
+        checkForUpdate(false);
         handler.removeMessages(WHAT_FLUSH);
         render();
         if (!listening) {
