@@ -70,6 +70,9 @@ public class MainActivity extends Activity
     // The same sentences as one clipboard entry for this screen. Written on pause or stop, replaced
     // each time, so the clipboard history gets one entry per screen and not one per sentence.
     private final ScreenClip screenClip = new ScreenClip();
+    private final LangChoice lang = new LangChoice();
+    // Number of clipboard writes this run, shown in the debug line so one entry per screen can be checked.
+    private int clipWrites = 0;
     // Composing (grey) line: the guess that is still being extended. Append-only.
     private String shown = "";
     // Partial results since the last commit, shown in the debug marker.
@@ -110,6 +113,7 @@ public class MainActivity extends Activity
     private Button startButton;
     private Button copyButton;
     private Button clearButton;
+    private Button langButton;
     private Button downloadButton;
     private TextView statusView;
     private TextView eventView;
@@ -137,6 +141,8 @@ public class MainActivity extends Activity
             copyAll();
         } else if (v == clearButton) {
             onClearPressed();
+        } else if (v == langButton) {
+            onLangPressed();
         } else if (v == downloadButton) {
             onDownloadPressed();
         }
@@ -181,9 +187,13 @@ public class MainActivity extends Activity
         clearButton = makeButton("지우기");
         clearButton.setOnClickListener(this);
 
+        langButton = makeButton(lang.label());
+        langButton.setOnClickListener(this);
+
         row.addView(startButton, weightParams());
         row.addView(copyButton, weightParams());
         row.addView(clearButton, weightParams());
+        row.addView(langButton, weightParams());
         root.addView(row, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -202,7 +212,7 @@ public class MainActivity extends Activity
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        downloadButton = makeButton("한국어 음성 모델 받기");
+        downloadButton = makeButton("음성 모델 받기");
         downloadButton.setVisibility(View.GONE);
         downloadButton.setOnClickListener(this);
         root.addView(downloadButton, new LinearLayout.LayoutParams(
@@ -244,7 +254,7 @@ public class MainActivity extends Activity
     // Second status line: the recognizer trace. Refreshed by onRmsChanged and the watchdog tick.
     private void updateEventLine() {
         eventView.setText("상태: " + lastEvent + " / running=" + sessionRunning
-                + " / pipe=" + usePipe + " / restarts=" + restartCount);
+                + " / clips=" + clipWrites + " / lang=" + lang.tag() + " / pipe=" + usePipe + " / restarts=" + restartCount);
     }
 
     // Records the last callback of the recognizer and when it arrived.
@@ -364,7 +374,7 @@ public class MainActivity extends Activity
         }
         if (recognizerIntent == null) {
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR");
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang.tag());
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
@@ -483,13 +493,33 @@ public class MainActivity extends Activity
         setStatus("지웠어요.");
     }
 
+    // Switches Korean <-> English. The recognizer is rebuilt for the new language; a running
+    // session keeps listening with it. Text already shown stays.
+    private void onLangPressed() {
+        lang.toggle();
+        langButton.setText(lang.label());
+        recognizerIntent = null;
+        if (recognizer != null) {
+            recognizer.cancel();
+            recognizer.destroy();
+            recognizer = null;
+        }
+        sessionRunning = false;
+        if (listening) {
+            commitShown("");
+            render();
+            startSegment();
+        }
+        setStatus("인식 언어: " + lang.label());
+    }
+
     private void onDownloadPressed() {
         if (Build.VERSION.SDK_INT < 33) {
             return;
         }
         ensureRecognizer();
         recognizer.triggerModelDownload(recognizerIntent);
-        setStatus("폰 시스템이 한국어 인식 모델만 내려받아요. 소리는 보내지 않아요.");
+        setStatus("폰 시스템이 인식 모델만 내려받아요. 소리는 보내지 않아요.");
     }
 
     @Override
@@ -561,6 +591,7 @@ public class MainActivity extends Activity
             if (cm != null) {
                 cm.setPrimaryClip(ClipData.newPlainText("wktalkclip", screenClip.text()));
                 screenClip.markWritten();
+                clipWrites++;
             }
         } catch (RuntimeException e) {
             lastEvent = "clip failed " + e.getClass().getSimpleName();
@@ -686,7 +717,7 @@ public class MainActivity extends Activity
                 || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
             commitShown(" …(e" + error + ")");
             render();
-            endSession("폰 시스템이 한국어 인식 모델만 내려받아요. 소리는 보내지 않아요.");
+            endSession("폰 시스템이 인식 모델만 내려받아요. 소리는 보내지 않아요.");
             if (Build.VERSION.SDK_INT >= 33) {
                 downloadButton.setVisibility(View.VISIBLE);
             }

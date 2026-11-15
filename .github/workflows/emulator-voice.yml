@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['qa/voice.sh', '.github/workflows/emulator-voice.yml']
+    paths: ['qa/voice.sh', 'src/**', '.github/workflows/emulator-voice.yml']
 
 permissions:
   contents: read
@@ -15,14 +15,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tag: [v0.1.8, v0.1.9]
+        include:
+          # RED: the pre-fix source (86627c3) with its language switched to English.
+          - name: red-old-en
+            ref: 86627c3
+            patch: true
+            lang: en
+            wait: 60
+          # GREEN: this build in English and in Korean (10 minute model wait).
+          - name: green-new-en
+            ref: ${{ github.sha }}
+            patch: false
+            lang: en
+            wait: 120
+          - name: green-new-ko
+            ref: ${{ github.sha }}
+            patch: false
+            lang: ko
+            wait: 600
+    name: voice ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          path: qa-src
 
-      - name: Fetch the APK under test
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download "${{ matrix.tag }}" --pattern wktalkclip.apk --dir apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build the APK under test
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          export ANDROID_SDK="$SDK"
+          if [ "${{ matrix.patch }}" = true ]; then sed -i 's/"ko-KR"/"en-US"/' app/src/app/wktalkclip/MainActivity.java; fi
+          (cd app && ./build.sh)
+          mkdir -p qa-src/apk && cp app/out/wktalkclip.apk qa-src/apk/wktalkclip.apk
 
       - name: Enable KVM
         run: |
@@ -31,25 +64,21 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Virtual microphone (null sink) and speech clip
-        continue-on-error: true
+        working-directory: qa-src
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq pulseaudio pulseaudio-utils espeak-ng ffmpeg > /dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq pulseaudio pulseaudio-utils ffmpeg > /dev/null
           pulseaudio --start --exit-idle-time=-1 || true
           pactl load-module module-null-sink sink_name=vmic sink_properties=device.description=vmic
           pactl set-default-source vmic.monitor
-          pactl list short sources
           mkdir -p clip
-          # Source 1: the owner's idea, a short Korean clip from YouTube (usually blocked on datacenter IPs).
-          pip install -q yt-dlp gTTS > /dev/null 2>&1 || true
-          if timeout 90 yt-dlp -x --audio-format wav --max-downloads 1 -o 'clip/yt.%(ext)s' "ytsearch1:한국어 뉴스 앵커 멘트 크리에이티브 커먼즈" > clip/yt.log 2>&1 && [ -f clip/yt.wav ]; then
-            echo "AUDIO_SOURCE=youtube"; cp clip/yt.wav clip/voice.wav
-          elif python3 -c "from gtts import gTTS; gTTS('안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다.', lang='ko').save('clip/tts.mp3')" 2>/dev/null && ffmpeg -loglevel error -y -i clip/tts.mp3 clip/voice.wav; then
-            echo "AUDIO_SOURCE=gtts"
+          pip install -q gTTS > /dev/null 2>&1 || true
+          if [ "${{ matrix.lang }}" = en ]; then
+            TEXT="Hello everyone. Let us start the meeting. The first item is the schedule. Please send me the notes."; L=en
           else
-            espeak-ng -v ko -w clip/voice.wav "안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다."
-            echo "AUDIO_SOURCE=espeak"
+            TEXT="안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다. 메모를 보내 주세요."; L=ko
           fi
-          tail -2 clip/yt.log || true
+          python3 -c "from gtts import gTTS; gTTS('$TEXT', lang='$L').save('clip/tts.mp3')"
+          ffmpeg -loglevel error -y -i clip/tts.mp3 clip/voice.wav
           ls -la clip
           ( while true; do paplay --device=vmic clip/voice.wav; sleep 1; done ) > /dev/null 2>&1 &
 
@@ -61,5 +90,6 @@ jobs:
           api-level: 34
           target: google_apis_playstore
           arch: x86_64
+          working-directory: qa-src
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -allow-host-audio
-          script: ./qa/voice.sh apk/wktalkclip.apk
+          script: ./qa/voice.sh apk/wktalkclip.apk ${{ matrix.lang }} ${{ matrix.wait }}
