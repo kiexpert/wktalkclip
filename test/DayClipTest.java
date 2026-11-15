@@ -76,6 +76,24 @@ public class DayClipTest {
         check("cap: header is kept", capped.startsWith(H + "\n"));
         check("cap: current meeting is whole", capped.contains("[20:00] 회의\n지금 회의 문장 하나\n지금 회의 문장 둘"));
         check("cap: the newest old line survives before the oldest one", capped.contains("오래된 문장 49") && !capped.contains("오래된 문장 0\n"));
+        // the header survives even when the current meeting alone is longer than the cap
+        DayClip huge = new DayClip();
+        huge.startMeeting("2026-11-16", "21:00", "");
+        for (int i = 0; i < 100; i++) {
+            huge.add("아주 긴 회의 문장 " + i);
+        }
+        String hc = huge.text(200);
+        check("cap: header survives a current meeting longer than the cap", hc.startsWith(H + "\n") && hc.length() <= 200);
+        check("cap: that trimmed text keeps the newest sentence", hc.contains("아주 긴 회의 문장 99"));
+        // the top line alone decides same day: a clip whose header is the same day is adopted
+        DayClip top = new DayClip();
+        top.startMeeting("2026-11-16", "22:00", H + "\n[07:00] 회의\n아침 문장");
+        top.add("밤 문장");
+        check("top line decides: same-day header adopts the entry", top.text(100000).contains("아침 문장") && top.text(100000).contains("밤 문장"));
+        DayClip other = new DayClip();
+        other.startMeeting("2026-11-16", "22:00", "[wktalkclip 2026-11-15]\n[07:00] 회의\n어제 문장\n" + H);
+        other.add("밤 문장");
+        check("top line decides: a header on a lower line does not count", !other.text(100000).contains("어제 문장"));
         System.exit(fails == 0 ? 0 : 1);
     }
 }
