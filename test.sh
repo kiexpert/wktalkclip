@@ -3,9 +3,10 @@
 set -e
 W="$(cd "$(dirname "$0")" && pwd)"
 rm -rf "$W/out/test"; mkdir -p "$W/out/test"
-javac -encoding UTF-8 -d "$W/out/test" "$W/src/app/wktalkclip/ScreenClip.java" "$W/src/app/wktalkclip/LangChoice.java" "$W/test/ScreenClipTest.java" "$W/src/app/wktalkclip/Transcript.java" "$W/src/app/wktalkclip/Backoff.java" "$W/src/app/wktalkclip/ErrorNames.java" "$W/src/app/wktalkclip/EventLog.java" "$W/test/DiagTest.java" "$W/src/app/wktalkclip/MeetingPause.java" "$W/test/MeetingPauseTest.java" "$W/test/RestartSoakTest.java" "$W/src/app/wktalkclip/Features.java" "$W/src/app/wktalkclip/MeetingFile.java" "$W/test/MeetingFileTest.java" "$W/test/LangChoiceTest.java" "$W/test/BackoffTest.java" "$W/test/TranscriptSoakTest.java"
+javac -encoding UTF-8 -d "$W/out/test" "$W/src/app/wktalkclip/ScreenClip.java" "$W/src/app/wktalkclip/LangChoice.java" "$W/test/ScreenClipTest.java" "$W/src/app/wktalkclip/Transcript.java" "$W/src/app/wktalkclip/Backoff.java" "$W/src/app/wktalkclip/ErrorNames.java" "$W/src/app/wktalkclip/EventLog.java" "$W/test/DiagTest.java" "$W/src/app/wktalkclip/MeetingPause.java" "$W/test/MeetingPauseTest.java" "$W/test/RestartSoakTest.java" "$W/src/app/wktalkclip/Features.java" "$W/src/app/wktalkclip/MeetingFile.java" "$W/test/MeetingFileTest.java" "$W/src/app/wktalkclip/DayClip.java" "$W/test/DayClipTest.java" "$W/test/LangChoiceTest.java" "$W/test/BackoffTest.java" "$W/test/TranscriptSoakTest.java"
 java -cp "$W/out/test" ScreenClipTest
 java -cp "$W/out/test" LangChoiceTest
+java -cp "$W/out/test" DayClipTest
 java -cp "$W/out/test" MeetingFileTest
 java -cp "$W/out/test" MeetingPauseTest
 java -cp "$W/out/test" RestartSoakTest
