@@ -199,7 +199,7 @@ public class MainActivity extends Activity
         buildUi();
         feedMode = getIntent().getBooleanExtra("feed", false) && FeedSource.clipFile(this) != null;
         setStatus("시작 버튼을 누르면 받아써요.\n1분 확인: ① 시작 ② 10초 말하기 ③ 글자가 나오는지 보기 "
-                + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸) ⑤ 카톡으로 → 그날 전체를 카카오톡으로 보내요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
+                + "④ 멈추기 → 클립보드 한 칸에 복사돼요(하루치가 한 칸) ⑤ 카톡으로 → 그날 전체를 카카오톡으로 보내요. 지우기는 화면만 지우고 그날의 클립보드 항목은 그대로 남아요. 안 되면 '진단'을 눌러 화면을 캡처해 주세요.");
         String crash = CrashShow.lastCrash;
         if (crash != null) {
             if (crash.length() > 300) {
