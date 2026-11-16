@@ -39,9 +39,19 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: ./build.sh
 
-      - name: Show signing certificate fingerprint
+      - name: Show the signing fingerprint and refuse a changed key
         run: |
-          "$ANDROID_SDK/build-tools/34.0.0/apksigner" verify --print-certs out/wktalkclip.apk | grep 'SHA-256 digest'
+          # An update only installs over the old app when the key is the same. A new key would
+          # publish an APK that cannot update in place, so the build stops before the release.
+          LINE=$("$ANDROID_SDK/build-tools/34.0.0/apksigner" verify --print-certs out/wktalkclip.apk | grep 'SHA-256 digest')
+          echo "$LINE"
+          FP=$(echo "$LINE" | head -1 | awk '{print $NF}')
+          EXPECTED=$(tr -d ' \r\n' < signing-fingerprint.txt)
+          if [ "$FP" != "$EXPECTED" ]; then
+            echo "SIGNING KEY CHANGED: got $FP, expected $EXPECTED. Not publishing." >&2
+            exit 1
+          fi
+          echo "signing fingerprint matches the pinned one"
 
       - name: Show version code
         run: |
