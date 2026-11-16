@@ -1159,9 +1159,9 @@ public class MainActivity extends Activity
     // Any other result commits the composing text, then one diff line.
     private void commitFinal(Bundle b) {
         String f = firstMatch(b);
-        if (f.length() == 0 || f.equals(shown)) {
+        if (f.length() == 0 || PartialRule.sameText(f, shown)) {
             commitShown("");
-        } else if (f.startsWith(shown)) {
+        } else if (PartialRule.extendsText(shown, f)) {
             addLine(f);
             shown = "";
             partialCount = 0;
@@ -1352,7 +1352,7 @@ public class MainActivity extends Activity
         if (p.length() == 0) {
             return; // never erase on an empty guess
         }
-        if (p.startsWith(shown)) {
+        if (PartialRule.extendsText(shown, p)) {
             shown = p;
         } else {
             String d = diffLine(shown, p);
