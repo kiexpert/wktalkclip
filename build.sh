@@ -16,13 +16,19 @@ rm -f out/res.zip out/unsigned.apk out/aligned.apk out/wktalkclip.apk
 
 # Step 2: link manifest and resources, generate R.java
 # CI sets BUILD_NUMBER (the run number, also the release tag v0.1.N): versionCode becomes 100 + N,
-# which is what an in-app update check compares with. Local builds keep the manifest values.
-VERARGS=""
+# which is what an in-app update check compares with. aapt2's --version-code is ignored when the
+# manifest already has a value, so a copy of the manifest is rewritten instead. Local builds keep
+# the manifest values.
+MANIFEST="AndroidManifest.xml"
 if [ -n "${BUILD_NUMBER:-}" ]; then
-    VERARGS="--version-code $((100 + BUILD_NUMBER)) --version-name 1.${BUILD_NUMBER}"
+    MANIFEST="out/AndroidManifest.build.xml"
+    sed -e "s/android:versionCode=\"[0-9]*\"/android:versionCode=\"$((100 + BUILD_NUMBER))\"/" \
+        -e "s/android:versionName=\"[^\"]*\"/android:versionName=\"1.${BUILD_NUMBER}\"/" \
+        AndroidManifest.xml > "$MANIFEST"
+    grep -q "android:versionCode=\"$((100 + BUILD_NUMBER))\"" "$MANIFEST" || { echo "versionCode rewrite failed" >&2; exit 1; }
 fi
-"$B/aapt2" link -I "$P" --manifest AndroidManifest.xml -o out/unsigned.apk \
-    --java gen out/res.zip --min-sdk-version 31 --target-sdk-version 34 $VERARGS
+"$B/aapt2" link -I "$P" --manifest "$MANIFEST" -o out/unsigned.apk \
+    --java gen out/res.zip --min-sdk-version 31 --target-sdk-version 34
 
 # Step 3: compile Java
 javac --release 11 -classpath "$P" -d out/classes \
