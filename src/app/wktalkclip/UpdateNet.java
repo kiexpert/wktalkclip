@@ -23,7 +23,7 @@ public final class UpdateNet {
     public static final String FALLBACK_APK =
             "https://github.com/kiexpert/wktalkclip/releases/latest/download/wktalkclip.apk";
     private static final int MAX_JSON = 400000;
-    private static final long MIN_APK = 100000L;
+    private static final long MIN_APK = 20000L; // the real APK is about 45 KB
 
     public interface Latest {
         void onLatest(String tag, String apkUrl);
