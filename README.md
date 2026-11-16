@@ -26,6 +26,10 @@ On-device Korean speech-to-text for Android. Audio and text never leave the phon
 - The share buttons send the day's whole text as plain text: `공유` opens the system share sheet, `카톡으로` goes straight to KakaoTalk if it is installed (otherwise the share sheet). No file, no Kakao SDK, no extra permission.
 - Final recognizer text goes to the clipboard; superseded partial guesses are shown on screen but not copied.
 
+## Signing key
+
+Updates only install over the installed app when the signing key stays the same. CI builds with a key kept in the Actions cache (kept alive by a small job every two days), or with the repository secrets `APK_KEYSTORE_B64` (the keystore, base64) and `APK_KEYSTORE_PASS` when they are set; a set secret wins. `signing-fingerprint.txt` holds the expected certificate fingerprint: a build that would be signed with a different key stops before it publishes a release. The key itself is never committed, printed or uploaded.
+
 ## Build (no Gradle)
 
 Needs JDK 11+, Android SDK platform 34 and build-tools 34.0.0 (set `ANDROID_SDK`, default `./sdk`).

@@ -44,12 +44,12 @@ javac --release 11 -classpath "$P" -d out/classes \
 
 # Step 6: keystore (created once)
 if [ ! -f "$W/wktalkclip.jks" ]; then
-    keytool -genkeypair -keystore "$W/wktalkclip.jks" -storepass android -keypass android \
+    keytool -genkeypair -keystore "$W/wktalkclip.jks" -storepass "${KS_PASS:-android}" -keypass "${KS_PASS:-android}" \
         -alias wktalkclip -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=wktalkclip"
 fi
 
 # Step 7: sign
-"$B/apksigner" sign --ks "$W/wktalkclip.jks" --ks-pass pass:android --key-pass pass:android \
+"$B/apksigner" sign --ks "$W/wktalkclip.jks" --ks-pass "pass:${KS_PASS:-android}" --key-pass "pass:${KS_PASS:-android}" \
     --out out/wktalkclip.apk out/aligned.apk
 
 echo "BUILD OK"
