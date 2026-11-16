@@ -113,6 +113,8 @@ public class MainActivity extends Activity
     private Button kakaoButton;
     private Button updateButton;
     private Button updateBanner;
+    private Button simpleButton;
+    private boolean simpleMode = false;
     // In-app update: the time of the last check lives in memory only (no file), once per 6 hours.
     private static long lastUpdateCheckMs = 0L;
     private String newApkUrl = null;
@@ -191,6 +193,8 @@ public class MainActivity extends Activity
             checkForUpdate(true);
         } else if (v == updateBanner) {
             startUpdate();
+        } else if (v == simpleButton) {
+            toggleSimple();
         } else if (v == langButton) {
             onLangPressed();
         } else if (v == downloadButton) {
@@ -275,6 +279,15 @@ public class MainActivity extends Activity
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        simpleButton = makeButton("단순 모드: 꺼짐");
+        simpleButton.setOnClickListener(this);
+        LinearLayout row3 = new LinearLayout(this);
+        row3.setOrientation(LinearLayout.HORIZONTAL);
+        row3.addView(simpleButton, weightParams());
+        root.addView(row3, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
         statusView = new TextView(this);
         statusView.setTextSize(16);
         statusView.setPadding(0, pad, 0, pad / 2);
@@ -349,7 +362,7 @@ public class MainActivity extends Activity
     // Second status line: the recognizer trace. Refreshed by onRmsChanged and the watchdog tick.
     private void updateEventLine() {
         eventView.setText("상태: " + lastEvent + " / running=" + sessionRunning
-                + " / clips=" + clipWrites + " / lang=" + lang.label() + "(" + lang.tag() + ")" + " / pipe=" + usePipe + " / restarts=" + restartCount);
+                + " / clips=" + clipWrites + " / lang=" + lang.label() + "(" + lang.tag() + ")" + (simpleMode ? " / 단순모드" : "") + " / pipe=" + usePipe + " / restarts=" + restartCount);
     }
 
     // Records the last callback of the recognizer and when it arrived.
@@ -385,11 +398,46 @@ public class MainActivity extends Activity
         }
     }
 
+    // Start does what StartPlan lists, in that order: the recognizer first, so that nothing else
+    // can get between the button and the microphone, then the day's clipboard entry, the recording
+    // service, the call watch, and last the notification permission dialog. Simple mode does only
+    // the recognizer (like the very first build), to find out on a phone whether another step is
+    // the reason dictation does not start.
     private void beginSession() {
         listening = true;
         sessionStartMs = System.currentTimeMillis();
-        // Same calendar day: this meeting is appended to the day's one clipboard entry. After a
-        // restart the day's text is recovered from the clipboard if it is this app's own entry.
+        rmsMin = 99f;
+        rmsMax = -99f;
+        rmsCount = 0;
+        eventLog.add(0L, "시작 누름 lang=" + lang.tag() + (simpleMode ? " 단순모드" : ""));
+        restartCount = 0;
+        usePipe = false;
+        lastEvent = "none";
+        lastEventMs = System.currentTimeMillis();
+        lastSoundMs = 0L;
+        shown = "";
+        partialCount = 0;
+        pausedByPolicy = false;
+        downloadButton.setVisibility(View.GONE);
+        startButton.setText("멈추기");
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        muteBeeps();
+        setStatus(simpleMode ? "단순 모드: 인식기만 시작해요" : "회의 중에는 폰 소리를 꺼 둬요");
+        Date nowD = new Date();
+        String dayKey = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(nowD);
+        String hm = new SimpleDateFormat("HH:mm", Locale.US).format(nowD);
+
+        // 1. the recognizer
+        startSegment();
+        scheduleWatchdog();
+
+        if (simpleMode) {
+            dayClip.startMeeting(dayKey, hm, "");
+            return;
+        }
+
+        // 2. the day's clipboard entry (same calendar day: this meeting is appended; after a
+        // restart the day's text is recovered from the clipboard if it is this app's own entry)
         String clipNow = "";
         try {
             ClipboardManager cm0 = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -401,37 +449,16 @@ public class MainActivity extends Activity
         } catch (RuntimeException e) {
             lastEvent = "clip read failed";
         }
-        Date nowD = new Date();
-        dayClip.startMeeting(new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(nowD),
-                new SimpleDateFormat("HH:mm", Locale.US).format(nowD), clipNow);
-        rmsMin = 99f;
-        rmsMax = -99f;
-        rmsCount = 0;
-        eventLog.add(0L, "시작 누름 lang=" + lang.tag());
-        restartCount = 0;
-        usePipe = false;
-        lastEvent = "none";
-        lastEventMs = System.currentTimeMillis();
-        lastSoundMs = 0L;
-        shown = "";
-        partialCount = 0;
-        downloadButton.setVisibility(View.GONE);
-        startButton.setText("멈추기");
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        muteBeeps();
+        dayClip.startMeeting(dayKey, hm, clipNow);
+
+        // 3. the recording service
         try {
             startForegroundService(new Intent(this, RecService.class));
         } catch (RuntimeException e) {
             lastEvent = "service " + e.getClass().getSimpleName();
         }
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[] { android.Manifest.permission.POST_NOTIFICATIONS },
-                    REQ_NOTIFY);
-        }
-        setStatus("회의 중에는 폰 소리를 꺼 둬요");
-        pausedByPolicy = false;
+
+        // 4. the call watch
         focusGuard = new FocusGuard(this, meetingPause, new Runnable() {
             @Override
             public void run() {
@@ -440,8 +467,19 @@ public class MainActivity extends Activity
         });
         focusGuard.start();
         recheckPause();
-        startSegment();
-        scheduleWatchdog();
+
+        // 5. the notification permission dialog, a few seconds later so it never opens over the start
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (listening && Build.VERSION.SDK_INT >= 33
+                        && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[] { android.Manifest.permission.POST_NOTIFICATIONS },
+                            REQ_NOTIFY);
+                }
+            }
+        }, 4000L);
     }
 
     // Called when a call starts or ends. Pauses the recognizer during a call and restarts it
@@ -889,6 +927,17 @@ public class MainActivity extends Activity
         } catch (RuntimeException e) {
             return false;
         }
+    }
+
+    // Simple mode: Start does only the recognizer (see beginSession). For finding why dictation fails.
+    private void toggleSimple() {
+        if (listening) {
+            Toast.makeText(this, "멈춘 뒤에 바꿔 주세요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        simpleMode = !simpleMode;
+        simpleButton.setText("단순 모드: " + (simpleMode ? "켜짐" : "꺼짐"));
+        setStatus(simpleMode ? "단순 모드 켜짐: 시작은 인식기만 해요." : "단순 모드 꺼짐.");
     }
 
     private void toggleDiag() {

@@ -29,7 +29,12 @@ has() { echo "$1" | grep -q "$2"; }
 
 # Language: the app starts in Korean and the language button cycles ko -> en -> auto, so for English
 # one tap on the button (whose label is then "한국어") is enough.
-pick_lang() { [ "$LANGSEL" = en ] && { $PY ui.py tap "한국어" >/dev/null; sleep 1; }; return 0; }
+pick_lang() {
+  [ "$LANGSEL" = en ] && { $PY ui.py tap "한국어" >/dev/null; sleep 1; }
+  # simple mode: Start does only the recognizer (the way the very first build did)
+  [ "${SIMPLE:-}" = 1 ] && { $PY ui.py tap "단순 모드: 꺼짐" >/dev/null; sleep 1; }
+  return 0
+}
 
 # Accept the offline model download once, as voice.sh's warmup does (the system dialog says Download).
 warmup() {

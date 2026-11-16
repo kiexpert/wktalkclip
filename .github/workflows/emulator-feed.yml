@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - 'qa/feed.sh'
+      - 'src/**'
       - 'qa/ui.py'
       - '.github/workflows/emulator-feed.yml'
 
@@ -16,7 +17,7 @@ permissions:
 jobs:
   feed:
     runs-on: ubuntu-latest
-    name: feed ${{ matrix.lang }} ${{ matrix.engine }}
+    name: feed ${{ matrix.lang }} ${{ matrix.engine }}${{ matrix.simple && ' simple' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +35,16 @@ jobs:
           # everything else end to end (sound in, text out, lines, clipboard). Never released.
           - lang: en
             engine: online
+            text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
+            tts: en
+            wait: 5
+            polls: 3
+            words: 'meeting schedule'
+            best_effort: true
+          # Same as the line above but Start does only the recognizer (simple mode).
+          - lang: en
+            engine: online
+            simple: 1
             text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
             tts: en
             wait: 5
@@ -121,6 +132,7 @@ jobs:
         env:
           FEED_OUT: ${{ github.workspace }}/feed-out
           DIALOG_POLLS: ${{ matrix.polls }}
+          SIMPLE: ${{ matrix.simple }}
         with:
           api-level: 34
           target: google_apis_playstore
@@ -132,6 +144,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: feed-${{ matrix.lang }}-${{ matrix.engine }}
+          name: feed-${{ matrix.lang }}-${{ matrix.engine }}${{ matrix.simple && '-simple' || '' }}
           path: feed-out/
           if-no-files-found: warn
