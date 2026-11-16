@@ -30,6 +30,8 @@ On-device Korean speech-to-text for Android. Audio and text never leave the phon
 
 Updates only install over the installed app when the signing key stays the same. CI signs with the repository secrets `APK_KEYSTORE_B64` (the keystore, base64) and `APK_KEYSTORE_PASS`; when they are not set it falls back to a key kept in the Actions cache. `signing-fingerprint.txt` holds the expected certificate fingerprint: a build that would be signed with a different key stops before it publishes a release. The key itself is never committed, printed or uploaded.
 
+Releases v0.1.1 to v0.1.3 were signed with one-off keys made on each CI run (the stable key first appears in v0.1.4), so Android refuses to update those over any later build (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, measured in the emulator feed QA run for v0.1.1): uninstall the old app once, then every later build installs over the previous one.
+
 ## Build (no Gradle)
 
 Needs JDK 11+, Android SDK platform 34 and build-tools 34.0.0 (set `ANDROID_SDK`, default `./sdk`).
