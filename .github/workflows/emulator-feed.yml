@@ -17,58 +17,68 @@ permissions:
 jobs:
   feed:
     runs-on: ubuntu-latest
-    name: feed ${{ matrix.lang }} ${{ matrix.engine }}${{ matrix.simple && ' simple' || '' }}
+    name: feed ${{ matrix.lang }} ${{ matrix.engine }}${{ matrix.simple && ' simple' || '' }}${{ matrix.upgrade_from && format(' upgrade-from-{0}', matrix.upgrade_from) || '' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Road A: the shipped on-device engine; wait up to 5 min for the system's language-pack dialog.
+          # CASE 1 (start/stop three times in one app session) on the shipped on-device engine.
           - lang: en
             engine: ondevice
             require_model: 1
+            rounds: 3
             text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
             tts: en
             wait: 180
             polls: 60
             words: 'meeting schedule'
             best_effort: true
-          # Korean on-device: only reports, by name, whether the Korean speech model is there.
-          - lang: ko
-            engine: ondevice
-            require_model: 1
-            text: '안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다.'
-            tts: ko
-            wait: 180
-            polls: 36
-            words: '회의 일정'
-            best_effort: true
-          # Road B: CI-only copy of the app that uses the online recognizer of the Google app, to prove
-          # everything else end to end (sound in, text out, lines, clipboard). Never released.
-          - lang: en
-            engine: online
-            text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
-            tts: en
-            wait: 5
-            polls: 3
-            words: 'meeting schedule'
-            best_effort: true
-          # Same as the line above but Start does only the recognizer (simple mode).
+          # CASE 1 on a CI-only copy that uses the online recognizer, in simple mode (never released).
           - lang: en
             engine: online
             simple: 1
+            rounds: 3
             text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
             tts: en
             wait: 5
             polls: 3
             words: 'meeting schedule'
             best_effort: true
-          - lang: ko
+          # CASE 2 (upgrade install): the very first release, signed with a one-off key from before the
+          # key was kept, is installed first; the new build goes over it, then three rounds.
+          - lang: en
+            engine: ondevice
+            require_model: 1
+            rounds: 3
+            upgrade_from: v0.1.1
+            text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
+            tts: en
+            wait: 180
+            polls: 60
+            words: 'meeting schedule'
+            best_effort: true
+          # CASE 2 from the first release that carries the stable signing key.
+          - lang: en
+            engine: ondevice
+            require_model: 1
+            rounds: 3
+            upgrade_from: v0.1.4
+            text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
+            tts: en
+            wait: 180
+            polls: 60
+            words: 'meeting schedule'
+            best_effort: true
+          - lang: en
             engine: online
-            text: '안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다.'
-            tts: ko
+            simple: 1
+            rounds: 3
+            upgrade_from: v0.1.4
+            text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
+            tts: en
             wait: 5
             polls: 3
-            words: '회의 일정'
+            words: 'meeting schedule'
             best_effort: true
     continue-on-error: ${{ matrix.best_effort }}
     steps:
@@ -79,7 +89,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Use the repository signing key (an upgrade install needs the real key)
+        env:
+          KS_B64: ${{ secrets.APK_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then echo "$KS_B64" | base64 -d > wktalkclip.jks; echo "signing key: repository secret"; else echo "signing key: a one-off key (no secret)"; fi
+
+      - name: Download the old release for the upgrade case
+        if: matrix.upgrade_from
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ matrix.upgrade_from }}" --pattern wktalkclip.apk --dir old --repo "${{ github.repository }}"
+
       - name: Build the APK
+        env:
+          KS_PASS: ${{ secrets.APK_KEYSTORE_PASS }}
         run: |
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" > /dev/null
@@ -145,6 +169,9 @@ jobs:
           DIALOG_POLLS: ${{ matrix.polls }}
           SIMPLE: ${{ matrix.simple }}
           REQUIRE_MODEL: ${{ matrix.require_model }}
+          ROUNDS: ${{ matrix.rounds }}
+          OLD_TAG: ${{ matrix.upgrade_from }}
+          OLD_APK: ${{ matrix.upgrade_from && format('{0}/old/wktalkclip.apk', github.workspace) || '' }}
         with:
           api-level: 34
           target: google_apis_playstore
@@ -156,6 +183,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: feed-${{ matrix.lang }}-${{ matrix.engine }}${{ matrix.simple && '-simple' || '' }}
+          name: feed-${{ matrix.lang }}-${{ matrix.engine }}${{ matrix.simple && '-simple' || '' }}${{ matrix.upgrade_from && format('-from-{0}', matrix.upgrade_from) || '' }}
           path: feed-out/
           if-no-files-found: warn

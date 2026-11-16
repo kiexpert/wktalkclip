@@ -15,14 +15,48 @@ cd "$(dirname "$0")"
 FAILS=0
 res() { echo "RESULT $1"; }
 
-adb install -r "$APK" >/dev/null
+launch() { adb shell am start -n $PKG/.MainActivity --ez feed true >/dev/null; sleep 4; }
+screen() { $PY ui.py dump; }
+signer() { "${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}/build-tools/34.0.0/apksigner" verify --print-certs "$1" 2>/dev/null | grep 'SHA-256 digest' | head -1 | awk '{print $NF}'; }
+
+if [ -n "${OLD_APK:-}" ]; then
+  # UPGRADE CASE: an old release is installed first and used once, then the new build is installed
+  # over it with `adb install -r`, which keeps the data. What must survive: the permission, the
+  # app's data (the pushed sound file) and the speech model. If the signing keys differ Android
+  # refuses the update; that is reported by name and the run continues on a clean install.
+  adb uninstall $PKG >/dev/null 2>&1 || true
+  adb install -r "$OLD_APK" >/dev/null || { res "FAIL could not install the old release ${OLD_TAG:-old}"; exit 1; }
+  adb shell pm grant $PKG android.permission.RECORD_AUDIO
+  adb shell mkdir -p "$DEST"
+  adb push "$WAV" "$DEST/feed.wav" >/dev/null
+  echo "[upgrade] old release ${OLD_TAG:-old} signer $(signer "$OLD_APK"), new build signer $(signer "$APK")"
+  adb shell am start -n $PKG/.MainActivity >/dev/null; sleep 4
+  $PY ui.py tap "시작" >/dev/null; sleep 8
+  echo "[upgrade] the old release after Start: $(screen)"
+  $PY ui.py tap "멈추기" >/dev/null; sleep 1
+  adb shell am force-stop $PKG; sleep 1
+  UP=$(adb install -r "$APK" 2>&1 | tr -d '\r' | tail -2 | tr '\n' ' ')
+  echo "[upgrade] adb install -r of the new build over ${OLD_TAG:-old}: $UP"
+  if echo "$UP" | grep -q "Success"; then
+    res "PASS upgrade install over ${OLD_TAG:-old} succeeded (same signing key)"
+    if adb shell dumpsys package $PKG | grep -E "android.permission.RECORD_AUDIO" | grep -q "granted=true"; then res "PASS the microphone permission was kept by the upgrade";
+    else res "FAIL the microphone permission was NOT kept by the upgrade"; FAILS=$((FAILS+1)); fi
+    if adb shell "ls $DEST/feed.wav" 2>/dev/null | grep -q feed.wav; then res "PASS the app's data was kept by the upgrade (feed.wav still there)";
+    else res "FAIL the app's data was NOT kept by the upgrade"; FAILS=$((FAILS+1)); fi
+  else
+    res "FAIL upgrade install over ${OLD_TAG:-old} refused: $UP (old signer $(signer "$OLD_APK"), new signer $(signer "$APK")); continuing on a clean install"
+    FAILS=$((FAILS+1))
+    adb uninstall $PKG >/dev/null 2>&1 || true
+    adb install -r "$APK" >/dev/null
+  fi
+else
+  adb install -r "$APK" >/dev/null
+fi
 adb shell pm grant $PKG android.permission.RECORD_AUDIO
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null || true
 adb logcat -c
 adb shell mkdir -p "$DEST"
 adb push "$WAV" "$DEST/feed.wav" >/dev/null || { res "FAIL adb push of wav"; exit 1; }
-launch() { adb shell am start -n $PKG/.MainActivity --ez feed true >/dev/null; sleep 4; }
-screen() { $PY ui.py dump; }
 # The transcript is one TextView with newlines, so split on both '|' (ui.py join) and newlines.
 lines_in() { echo "$1" | tr '|' '\n' | grep -cE '^\[[0-9]{2}:[0-9]{2}\]'; }
 has() { echo "$1" | grep -q "$2"; }
@@ -91,52 +125,61 @@ warmup() {
 warmup
 launch
 pick_lang
-T0=$(date +%s)
-$PY ui.py tap "시작" >/dev/null; sleep 6
-S=$(screen)
-echo "[start] right after the first Start: $S"
-adb logcat -d | grep -E "FATAL|AndroidRuntime|app.wktalkclip|SpeechRecogn|RecognitionService" | tail -25 | sed 's/^/LOG: /'
-# After the model is ready the app may still show 시작 (the earlier try ended); press it again.
-if ! has "$S" "멈추기"; then $PY ui.py tap "시작" >/dev/null; sleep 6; fi
-# The clip loops; give the recognizer up to ~90 s to commit a transcript line.
-sleep 20
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
-  S=$(screen)
-  [ "$(lines_in "$S")" -gt 0 ] && break
-  sleep 5
-done
-sleep 5
-S=$(screen)
-echo "$S" > "$OUT/screen-$LANGSEL.txt"
-adb logcat -d > "$OUT/logcat-$LANGSEL.txt" 2>&1
-echo "$S" | tr '|' '\n' | sed 's/^/SCREEN: /'
-
-N=$(lines_in "$S")
-if [ "$N" -gt 0 ]; then res "PASS transcript has $N line(s)"; else res "FAIL transcript empty"; FAILS=$((FAILS+1)); fi
-# The clip is played in a loop, so a sentence is read at most once per loop. A display line per
-# loop is right; many more lines for the same sound file means the app prints revisions of one
-# sentence as lines of their own (for example a case-only change). Limit = loops played + 2.
-T1=$(date +%s)
+ROUNDS="${ROUNDS:-1}"
 CLIP_SECS=$(( ( $(stat -c %s "$WAV") - 44 ) / 32000 ))
-LOOPS=$(( (T1 - T0) * 10 / ( CLIP_SECS * 10 + 15 ) ))
-LIMIT=$(( LOOPS + 2 ))
-if [ "$N" -le "$LIMIT" ]; then res "PASS display lines for the sound file: $N (limit $LIMIT = $LOOPS loops played + 2)";
-else res "FAIL display lines for the sound file: $N (limit $LIMIT = $LOOPS loops played + 2): one sentence is shown as several lines"; FAILS=$((FAILS+1)); fi
-
-if [ ${#WORDS[@]} -gt 0 ]; then
-  FOUND=""
-  for w in "${WORDS[@]}"; do
-    if echo "$S" | grep -qiF -- "$w"; then FOUND="$w"; break; fi
+transcript_lines() { echo "$1" | tr '|' '\n' | grep -E '^\[[0-9]{2}:[0-9]{2}\]'; }
+PREV=0
+for R in $(seq 1 "$ROUNDS"); do
+  # One app session: Start, the sound file, Stop, and again without leaving the app.
+  T0=$(date +%s)
+  $PY ui.py tap "시작" >/dev/null; sleep 6
+  S=$(screen)
+  [ "$R" = 1 ] && { echo "[start] right after the first Start: $S"; adb logcat -d | grep -E "FATAL|AndroidRuntime|app.wktalkclip|SpeechRecogn|RecognitionService" | tail -25 | sed 's/^/LOG: /'; }
+  # After the model is ready the app may still show 시작 (the earlier try ended); press it again.
+  if ! has "$S" "멈추기"; then $PY ui.py tap "시작" >/dev/null; sleep 6; fi
+  # The clip loops; give the recognizer up to ~90 s to commit a transcript line of its own.
+  sleep 20
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
+    S=$(screen)
+    [ "$(lines_in "$S")" -gt "$PREV" ] && break
+    sleep 5
   done
-  if [ -n "$FOUND" ]; then res "PASS text contains expected word '$FOUND'";
-  else res "FAIL text contains none of: ${WORDS[*]}"; FAILS=$((FAILS+1)); fi
-else
-  res "NA no expected words given"
-fi
-
-$PY ui.py tap "멈추기" >/dev/null; sleep 2
-S=$(screen)
-echo "$S" > "$OUT/screen-$LANGSEL-after-stop.txt"
+  sleep 5
+  S=$(screen)
+  echo "$S" > "$OUT/screen-$LANGSEL-round$R.txt"
+  [ "$R" = "$ROUNDS" ] && { adb logcat -d > "$OUT/logcat-$LANGSEL.txt" 2>&1; }
+  echo "$S" | tr '|' '\n' | sed "s/^/SCREEN r$R: /"
+  TOTAL=$(lines_in "$S")
+  NEW=$((TOTAL - PREV))
+  ROUND_TEXT=$(transcript_lines "$S" | sed -n "$((PREV + 1)),\$p")
+  ERRNAME=$(echo "$S" | grep -oE 'err[0-9]+' | head -1)
+  T1=$(date +%s)
+  LOOPS=$(( (T1 - T0) * 10 / ( CLIP_SECS * 10 + 15 ) ))
+  LIMIT=$(( LOOPS + 2 ))
+  if [ "$NEW" -gt 0 ]; then res "PASS round $R: its own transcript has $NEW new line(s)"; else res "FAIL round $R: no transcript of its own (new lines: 0, recognizer error: ${ERRNAME:-none})"; FAILS=$((FAILS+1)); fi
+  # A sentence is read at most once per loop of the sound file; many more lines means one sentence
+  # is shown as several lines (for example a case-only change). Limit = loops played + 2.
+  if [ "$NEW" -le "$LIMIT" ]; then res "PASS round $R: display lines for the sound file: $NEW (limit $LIMIT = $LOOPS loops played + 2)";
+  else res "FAIL round $R: display lines for the sound file: $NEW (limit $LIMIT = $LOOPS loops played + 2): one sentence is shown as several lines"; FAILS=$((FAILS+1)); fi
+  if [ ${#WORDS[@]} -gt 0 ]; then
+    FOUND=""
+    for w in "${WORDS[@]}"; do
+      if echo "$ROUND_TEXT" | grep -qiF -- "$w"; then FOUND="$w"; break; fi
+    done
+    if [ -n "$FOUND" ]; then res "PASS round $R: its own lines contain the expected word '$FOUND'";
+    else res "FAIL round $R: its own lines contain none of: ${WORDS[*]}"; FAILS=$((FAILS+1)); fi
+  fi
+  echo "ROUND $R: new_lines=$NEW total_lines=$TOTAL recognizer_error=${ERRNAME:-none}"
+  $PY ui.py tap "멈추기" >/dev/null; sleep 2
+  S=$(screen)
+  echo "$S" > "$OUT/screen-$LANGSEL-after-stop$R.txt"
+  C=$(echo "$S" | grep -oE 'clips=[0-9]+' | head -1)
+  # Each Stop writes the day's one entry once, so after round R the counter is R.
+  if [ "$C" = "clips=$R" ]; then res "PASS round $R: clipboard counter after Stop: $C (one write per stop)";
+  else res "FAIL round $R: clipboard counter after Stop: ${C:-none} (expected clips=$R)"; FAILS=$((FAILS+1)); fi
+  PREV=$TOTAL
+done
+N=$PREV
 # The day's text goes to the share sheet: KakaoTalk is not on the emulator, so the button must fall back to it.
 if [ "$N" -gt 0 ]; then
   $PY ui.py tap "카톡으로" >/dev/null; sleep 3
@@ -150,11 +193,6 @@ if [ "$N" -gt 0 ]; then
 fi
 # Update banner from the real release check.
 if echo "$S" | grep -q "새 버전 v0.1."; then res "PASS update banner is shown"; else res "NA update banner not seen on this screen"; fi
-C=$(echo "$S" | grep -oE 'clips=[0-9]+' | head -1)
-if [ -z "$C" ]; then res "NA clipboard writes (build has no counter)";
-elif [ "$C" = "clips=1" ]; then res "PASS clipboard counter after $N lines: $C (one write for the whole session)";
-else res "FAIL clipboard counter after $N lines: $C (expected clips=1)"; FAILS=$((FAILS+1)); fi
-
 adb logcat -d > "$OUT/logcat-$LANGSEL.txt" 2>&1
 adb shell am force-stop $PKG; sleep 2
 exit $FAILS
