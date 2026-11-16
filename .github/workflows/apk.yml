@@ -43,6 +43,10 @@ jobs:
         run: |
           "$ANDROID_SDK/build-tools/34.0.0/apksigner" verify --print-certs out/wktalkclip.apk | grep 'SHA-256 digest'
 
+      - name: Show version code
+        run: |
+          "$ANDROID_SDK/build-tools/34.0.0/aapt2" dump badging out/wktalkclip.apk | sed -n "s/^package: .*versionCode='\([0-9]*\)'.*versionName='\([^']*\)'.*/VERSION versionCode=\1 versionName=\2/p"
+
       - name: Upload run artifact
         uses: actions/upload-artifact@v4
         with:
