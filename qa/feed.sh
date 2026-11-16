@@ -91,6 +91,7 @@ warmup() {
 warmup
 launch
 pick_lang
+T0=$(date +%s)
 $PY ui.py tap "시작" >/dev/null; sleep 6
 S=$(screen)
 echo "[start] right after the first Start: $S"
@@ -112,6 +113,15 @@ echo "$S" | tr '|' '\n' | sed 's/^/SCREEN: /'
 
 N=$(lines_in "$S")
 if [ "$N" -gt 0 ]; then res "PASS transcript has $N line(s)"; else res "FAIL transcript empty"; FAILS=$((FAILS+1)); fi
+# The clip is played in a loop, so a sentence is read at most once per loop. A display line per
+# loop is right; many more lines for the same sound file means the app prints revisions of one
+# sentence as lines of their own (for example a case-only change). Limit = loops played + 2.
+T1=$(date +%s)
+CLIP_SECS=$(( ( $(stat -c %s "$WAV") - 44 ) / 32000 ))
+LOOPS=$(( (T1 - T0) * 10 / ( CLIP_SECS * 10 + 15 ) ))
+LIMIT=$(( LOOPS + 2 ))
+if [ "$N" -le "$LIMIT" ]; then res "PASS display lines for the sound file: $N (limit $LIMIT = $LOOPS loops played + 2)";
+else res "FAIL display lines for the sound file: $N (limit $LIMIT = $LOOPS loops played + 2): one sentence is shown as several lines"; FAILS=$((FAILS+1)); fi
 
 if [ ${#WORDS[@]} -gt 0 ]; then
   FOUND=""
@@ -142,7 +152,8 @@ fi
 if echo "$S" | grep -q "새 버전 v0.1."; then res "PASS update banner is shown"; else res "NA update banner not seen on this screen"; fi
 C=$(echo "$S" | grep -oE 'clips=[0-9]+' | head -1)
 if [ -z "$C" ]; then res "NA clipboard writes (build has no counter)";
-else res "PASS clipboard counter after $N sentences: $C"; fi
+elif [ "$C" = "clips=1" ]; then res "PASS clipboard counter after $N lines: $C (one write for the whole session)";
+else res "FAIL clipboard counter after $N lines: $C (expected clips=1)"; FAILS=$((FAILS+1)); fi
 
 adb logcat -d > "$OUT/logcat-$LANGSEL.txt" 2>&1
 adb shell am force-stop $PKG; sleep 2
