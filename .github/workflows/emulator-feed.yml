@@ -25,11 +25,22 @@ jobs:
           # Road A: the shipped on-device engine; wait up to 5 min for the system's language-pack dialog.
           - lang: en
             engine: ondevice
+            require_model: 1
             text: 'Hello everyone. Let us start the meeting. The first item is the schedule.'
             tts: en
             wait: 180
             polls: 60
             words: 'meeting schedule'
+            best_effort: true
+          # Korean on-device: only reports, by name, whether the Korean speech model is there.
+          - lang: ko
+            engine: ondevice
+            require_model: 1
+            text: '안녕하세요. 오늘 회의를 시작하겠습니다. 첫 번째 안건은 일정입니다.'
+            tts: ko
+            wait: 180
+            polls: 36
+            words: '회의 일정'
             best_effort: true
           # Road B: CI-only copy of the app that uses the online recognizer of the Google app, to prove
           # everything else end to end (sound in, text out, lines, clipboard). Never released.
@@ -133,6 +144,7 @@ jobs:
           FEED_OUT: ${{ github.workspace }}/feed-out
           DIALOG_POLLS: ${{ matrix.polls }}
           SIMPLE: ${{ matrix.simple }}
+          REQUIRE_MODEL: ${{ matrix.require_model }}
         with:
           api-level: 34
           target: google_apis_playstore

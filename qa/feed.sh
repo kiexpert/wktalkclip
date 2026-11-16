@@ -37,23 +37,55 @@ pick_lang() {
 }
 
 # Accept the offline model download once, as voice.sh's warmup does (the system dialog says Download).
-warmup() {
+warmup_round() {
   launch
   pick_lang
   $PY ui.py tap "시작" >/dev/null; sleep 6
   if has "$(screen)" "음성 모델 받기"; then
-    echo "[warmup] model missing, download wait ${WAIT}s"
+    echo "[warmup] model missing, asking the system to download it"
     $PY ui.py tap "음성 모델 받기" >/dev/null
     for i in $(seq 1 "${DIALOG_POLLS:-12}"); do
       sleep 5
       D=$(screen); echo "[warmup] dialog check $i: $D"
       T=$($PY ui.py tap "Download")
       [ "$T" = tapped ] || T=$($PY ui.py tap "다운로드")
-      if [ "$T" = tapped ]; then echo "[warmup] tapped download"; break; fi
+      if [ "$T" = tapped ]; then echo "[warmup] tapped download"; adb shell am force-stop $PKG; return 0; fi
     done
-    sleep "$WAIT"
   fi
   adb shell am force-stop $PKG; sleep 2
+  return 1
+}
+
+# Reads the installed on-device languages from the app's diagnostics screen.
+installed_models() {
+  launch
+  $PY ui.py tap "진단" >/dev/null; sleep 5
+  D=$(screen)
+  adb shell am force-stop $PKG
+  echo "$D" | tr '|' '\n' | grep -oE '설치됨=\[[^]]*\]' | head -1
+}
+
+# The system asks for the download at the second or third try, so repeat the whole round.
+warmup() {
+  for r in 1 2 3; do
+    echo "[warmup] round $r"
+    if warmup_round; then
+      echo "[warmup] waiting ${WAIT}s for the download"
+      sleep "$WAIT"
+      break
+    fi
+  done
+  if [ "${REQUIRE_MODEL:-}" = 1 ]; then
+    NEED=en-US; [ "$LANGSEL" = ko ] && NEED=ko-KR
+    INST=$(installed_models)
+    echo "MODEL CHECK: need $NEED, the phone reports: ${INST:-nothing}"
+    if ! echo "$INST" | grep -q "$NEED"; then
+      echo "RESULT FAIL MISSING MODEL: on-device speech model $NEED is not installed (${INST:-no report}); the on-device path cannot be proven on this emulator image"
+      echo "$INST" > "$OUT/model-missing-$LANGSEL.txt"
+      exit 1
+    fi
+    echo "RESULT PASS on-device model $NEED is installed"
+  fi
 }
 
 warmup
